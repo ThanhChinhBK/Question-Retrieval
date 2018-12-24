@@ -2,7 +2,6 @@ import tensorflow as tf
 import numpy as np
 import datetime
 from Match_LSTM import MatchLSTM
-from sklearn.metrics import f1_score
 import json
 import os
 import DataUtils
@@ -138,11 +137,11 @@ if __name__ == "__main__":
         os.makedirs(checkpoint_dir)
     saver = tf.train.Saver(tf.global_variables(), max_to_keep=FLAGS.num_checkpoints)
     callback = DataUtils.AnsSelCB(inp_val['q'], inp_val['sents'], y_val, inp_val)
-    test_data = [ inp_test['qi'],
-                  inp_test['si'],
-                  inp_test['q_l'],
-                  inp_test['s_l'],
-                  y_test
+    test_data = [ inp_val['qi'],
+                  inp_val['si'],
+                  inp_val['q_l'],
+                  inp_val['s_l'],
+                  y_val
     ]
     
     sess.run(tf.global_variables_initializer())
@@ -153,13 +152,14 @@ if __name__ == "__main__":
                            inp_tr['si'][i:i+FLAGS.batch_size],
                            inp_tr['q_l'][i:i+FLAGS.batch_size],
                            inp_tr['s_l'][i:i+FLAGS.batch_size],
-                           y_train
+                           y_train[i:i+FLAGS.batch_size]
             ]
             loss = train_step(sess, model, train_op, data_batch)
             t.set_description("train loss %.6f" % loss)
             t.refresh() 
         curr_map = test_step(sess, model, test_data, callback)
+        print("Best MAP:{} on epoch {}".format(best_map, best_epoch))
         if curr_map > best_map:
-            best_map == curr_map
+            best_map = curr_map
             best_epoch = e
             save_path = saver.save(sess, os.path.join(checkpoint_dir, "checkpoint"), e)
