@@ -1,12 +1,176 @@
 import tensorflow as tf
+from attention_wrapper import _maybe_mask_score
+from attention_wrapper import *
+from tensorflow.python import debug as tf_debug
+from tensorflow.python.ops import array_ops
+import numpy as np
+
+
+def _reverse(input_, seq_lengths, seq_dim, batch_dim):
+    if seq_lengths is not None:
+        return array_ops.reverse_sequence(
+            input=input_, seq_lengths=seq_lengths,
+            seq_dim=seq_dim, batch_dim=batch_dim)
+    else:
+        return array_ops.reverse(input_, axis=[seq_dim])
+
+
+class Encoder(object):
+
+    # tf.contrib.layers.xavier_initializer):
+    def __init__(self, hidden_size, initializer=lambda: None):
+        self.hidden_size = hidden_size
+        self.init_weights = initializer
+
+    def encode(self, inputs, masks, encoder_state_input=None):
+        """
+        :param inputs: vector representations of question and hypothesis (a tuple) 
+        :param masks: masking sequences for both question and hypothesis (a tuple)
+        :param encoder_state_input: (Optional) pass this as initial hidden state
+                                    to tf.nn.dynamic_rnn to build conditional representations
+        :return: an encoded representation of the question and hypothesis.
+        """
+
+        question, hypothesis = inputs
+        masks_question, masks_hypothesis = masks
+
+        # read hypothesis conditioned upon the question
+        with tf.variable_scope("encoded_question"):
+            lstm_cell_question = tf.contrib.rnn.BasicLSTMCell(
+                self.hidden_size, state_is_tuple=True)
+            encoded_question, (q_rep, _) = tf.nn.dynamic_rnn(
+                lstm_cell_question, question, masks_question, dtype=tf.float32)  # (-1, Q, H)
+
+        with tf.variable_scope("encoded_hypothesis"):
+            lstm_cell_hypothesis = tf.contrib.rnn.BasicLSTMCell(
+                self.hidden_size, state_is_tuple=True)
+            encoded_hypothesis, (p_rep, _) = tf.nn.dynamic_rnn(
+                lstm_cell_hypothesis, hypothesis, masks_hypothesis, dtype=tf.float32)  # (-1, P, H)
+
+        # outputs beyond sequence lengths are masked with 0s
+        return encoded_question, encoded_hypothesis, q_rep, p_rep
+
+
+class Decoder(object):
+
+    def __init__(self, hidden_size, Ddim, initializer=lambda: None):
+        self.hidden_size = hidden_size
+        self.init_weights = initializer
+        self.Ddim = Ddim
+
+    def run_lstm(self, encoded_rep, q_rep, masks):
+        encoded_question, encoded_hypothesis = encoded_rep
+        masks_question, masks_hypothesis = masks
+
+        q_rep = tf.expand_dims(q_rep, 1)  # (batch_size, 1, D)
+        encoded_hypothesis_shape = tf.shape(encoded_hypothesis)[1]
+        q_rep = tf.tile(q_rep, [1, encoded_hypothesis_shape, 1])
+
+        mixed_question_hypothesis_rep = tf.concat(
+            [encoded_hypothesis, q_rep], axis=-1)
+
+        with tf.variable_scope("lstm_"):
+            cell = tf.contrib.rnn.BasicLSTMCell(
+                self.hidden_size, state_is_tuple=True)
+            reverse_mixed_question_hypothesis_rep = _reverse(
+                mixed_question_hypothesis_rep, masks_hypothesis, 1, 0)
+
+            output_attender_fw, _ = tf.nn.dynamic_rnn(
+                cell, mixed_question_hypothesis_rep, dtype=tf.float32, scope="rnn")
+            output_attender_bw, _ = tf.nn.dynamic_rnn(
+                cell, reverse_mixed_question_hypothesis_rep, dtype=tf.float32, scope="rnn")
+
+            output_attender_bw = _reverse(
+                output_attender_bw, masks_hypothesis, 1, 0)
+
+        output_attender = tf.concat(
+            [output_attender_fw, output_attender_bw], axis=-1)  # (-1, P, 2*H)
+        return output_attender
+
+    def run_match_lstm(self, encoded_rep, masks):
+        encoded_question, encoded_hypothesis = encoded_rep
+        masks_question, masks_hypothesis = masks
+
+        match_lstm_cell_attention_fn = lambda curr_input, state: tf.concat(
+            [curr_input, state], axis=-1)
+        query_depth = encoded_question.get_shape()[-1]
+
+        # output attention is false because we want to output the cell output
+        # and not the attention values
+        with tf.variable_scope("match_lstm_attender"):
+            attention_mechanism_match_lstm = BahdanauAttention(
+                query_depth, encoded_question, memory_sequence_length=masks_question)
+            cell = tf.contrib.rnn.BasicLSTMCell(
+                self.hidden_size, state_is_tuple=True)
+            lstm_attender = AttentionWrapper(
+                cell, attention_mechanism_match_lstm,
+                output_attention=False,
+                attention_input_fn=match_lstm_cell_attention_fn)
+
+            # we don't mask the hypothesis because masking the memories will be
+            # handled by the pointerNet
+            reverse_encoded_hypothesis = _reverse(
+                encoded_hypothesis, masks_hypothesis, 1, 0)
+
+            output_attender_fw, state_attender_fw = tf.nn.dynamic_rnn(
+                lstm_attender, encoded_hypothesis, dtype=tf.float32, scope="rnn")
+            output_attender_bw, state_attender_bw = tf.nn.dynamic_rnn(
+                lstm_attender, reverse_encoded_hypothesis, dtype=tf.float32, scope="rnn")
+            output_attender_bw = _reverse(
+                output_attender_bw, masks_hypothesis, 1, 0)
+        output_attender = tf.concat(
+            [state_attender_fw[0].h, state_attender_bw[0].h], axis=-1)  # (-1, 2*H)
+        return output_attender
+
+    def run_projection(self, state_attender):
+        input_projection = state_attender
+        for n, ddim in enumerate(self.Ddim):
+            _, curr_dim = input_projection.get_shape()
+            w = tf.get_variable(dtype=tf.float32,
+                                shape=[curr_dim, self.hidden_size * ddim],
+                                name='w_{}'.format(n))
+            b = tf.get_variable(dtype=tf.float32,
+                                shape=[self.hidden_size * ddim],
+                                name='b_{}'.format(n))
+            input_projection = tf.matmul(input_projection, w) + b
+            
+        _, curr_dim = input_projection.get_shape()
+        w_fc = tf.get_variable(
+                shape=[curr_dim, 1], name='w_fc', dtype=tf.float32)
+        b_fc = tf.get_variable(shape=[1], name='b_fc', dtype=tf.float32)
+        output_projection = tf.layers.dense(input_projection,
+                                            1,
+                                            name="projection_final")
+        return output_projection
+
+    def decode(self, encoded_rep, q_rep, masks, labels):
+        """
+        takes in encoded_rep
+        and output a probability estimation over
+        all paragraph tokens on which token should be
+        the start of the answer span, and which should be
+        the end of the answer span.
+        :param encoded_rep: 
+        :param masks
+        :param labels
+        :return: logits: for each word in hypothesis the probability that it is the start word and end word.
+        """
+
+        output_attender = self.run_match_lstm(encoded_rep, masks)
+        logits = self.run_projection(output_attender)
+
+        return logits
 
 
 class MatchLSTM(object):
 
     def __init__(self, flags, vocab, word_embedding):
         self.config = flags
+        self.Ddim = [int(x) for x in self.config.Ddim.split()]
         self.vocab = vocab
         self.word_embedding = word_embedding
+        self.encoder = Encoder(self.config.hidden_layer)
+        self.decoder = Decoder(self.config.hidden_layer, self.Ddim)
         self._add_placeholder()
         self._add_embedding()
         self._build_model()
@@ -29,7 +193,8 @@ class MatchLSTM(object):
     def _add_embedding(self):
         with tf.device("/cpu:0"):
             with tf.variable_scope("embeddings"):
-                init_emb = tf.constant(self.vocab.embmatrix(self.word_embedding), dtype=tf.float32)
+                init_emb = tf.constant(self.vocab.embmatrix(
+                    self.word_embedding), dtype=tf.float32)
                 embeddings = tf.get_variable("word_embedding",
                                              initializer=init_emb,
                                              dtype=tf.float32)
@@ -44,114 +209,16 @@ class MatchLSTM(object):
                     self.hypothesis_embedding, self.dropout)
 
     def _build_model(self):
-        with tf.variable_scope("basic_lstm"):
-            # LSTM layer
-            with tf.variable_scope("query_lstm"):
-                query_cell = tf.contrib.rnn.LSTMCell(self.config.hidden_layer)
-                if self.config.dropout < 1:
-                    query_cell = tf.contrib.rnn.DropoutWrapper(
-                        query_cell, input_keep_prob=self.dropout, output_keep_prob=self.dropout)
-                query_outputs, _ = tf.nn.dynamic_rnn(cell=query_cell,
-                                                     inputs=self.queries_embedding,
-                                                     sequence_length=self.queries_length,
-                                                     dtype=tf.float32)
-            with tf.variable_scope("hypothesis_lstm"):
-                hypothesis_cell = tf.contrib.rnn.LSTMCell(
-                    self.config.hidden_layer)
-                if self.config.dropout < 1:
-                    hypothesis_cell = tf.contrib.rnn.DropoutWrapper(
-                        hypothesis_cell, input_keep_prob=self.dropout, output_keep_prob=self.dropout)
-                hypothesis_outputs, _ = tf.nn.dynamic_rnn(cell=hypothesis_cell,
-                                                          inputs=self.hypothesis_embedding,
-                                                          sequence_length=self.hypothesis_length,
-                                                          dtype=tf.float32)
-
-        with tf.variable_scope("match_attention_lstm"):
-            # match attention layer
-            lstm_m_cell = tf.contrib.rnn.LSTMCell(
-                num_units=self.config.hidden_layer)
-            if self.config.dropout < 1:
-                lstm_m_cell = tf.contrib.rnn.DropoutWrapper(
-                    lstm_m_cell, input_keep_prob=self.dropout, output_keep_prob=self.dropout)
-            We = tf.get_variable(name="We",
-                                 shape=[self.config.hidden_layer, 1],
-                                 dtype=tf.float32)
-            Ws = tf.get_variable(name="Ws",
-                                 shape=[self.config.hidden_layer,
-                                        self.config.hidden_layer],
-                                 dtype=tf.float32)
-            Wt = tf.get_variable(name="Wt",
-                                 shape=[self.config.hidden_layer,
-                                        self.config.hidden_layer],
-                                 dtype=tf.float32)
-            Wm = tf.get_variable(name="Wm",
-                                 shape=[self.config.hidden_layer,
-                                        self.config.hidden_layer],
-                                 dtype=tf.float32)
-            h_s = tf.transpose(query_outputs, [1, 0, 2])
-
-            batch_size, _ = tf.unstack(tf.shape(self.queries))
-
-            #print("hs shape:", h_s.shape)
-            def attention_fn_transition(time,  previous_output, previous_state, previous_loop_state):
-                if previous_state is None:
-                    assert previous_output is None and previous_state is None
-                    h_m = tf.zeros([batch_size, self.config.hidden_layer],
-                                   dtype=tf.float32, name='PAD')
-                    state = lstm_m_cell.zero_state(batch_size, tf.float32)
-                    output = None
-                else:
-                    h_m = previous_output
-                    state = previous_state
-                    output = previous_output
-
-                #print("h_m shape:", h_m.shape)
-                h_t = hypothesis_outputs[:, time, :]
-                h_t = tf.reshape(h_t, [-1, self.config.hidden_layer])
-                #print("h_t.shape:", h_t.shape)
-                e_k = tf.einsum('ijk,kl->ijl',
-                                tf.tanh(tf.einsum('ijk,kl->ijl', h_s, Ws) +
-                                        tf.matmul(h_t, Wt)) + tf.matmul(h_m, Wm),
-                                We)
-                alpha_k = tf.nn.softmax(e_k)
-                a_k = tf.reduce_sum(tf.multiply(alpha_k, h_s), 0)
-                #print("a_k shape:", a_k.shape)
-                element_finished = (time >= self.hypothesis_length - 1)
-                loop_state = None
-                finished = tf.reduce_all(element_finished)
-                input = tf.cond(finished,
-                                lambda: tf.zeros(
-                                    [batch_size, 2 * self.config.hidden_layer], dtype=tf.float32, name='PAD'),
-                                lambda: tf.concat([a_k, h_t], 1))
-
-                return (element_finished, input, state, output, loop_state)
-
-            _, (_, attention_final_state), _ = tf.nn.raw_rnn(
-                lstm_m_cell, attention_fn_transition)
-
-        with tf.variable_scope("fully_connected"):
-            # fully connected classifier
-            curr_dim = self.config.hidden_layer
-            curr_input = attention_final_state
-            Ddim_list = [int(x) for x in self.config.Ddim.split()]
-            for i, D in enumerate(Ddim_list):
-                w = tf.get_variable(dtype=tf.float32,
-                                    shape=[
-                                        curr_dim, self.config.hidden_layer * D],
-                                    name='w_{}'.format(i))
-                b = tf.get_variable(dtype=tf.float32,
-                                    shape=[self.config.hidden_layer * D],
-                                    name='b_{}'.format(i))
-                curr_dim = self.config.hidden_layer * D
-                curr_input = tf.matmul(curr_input, w) + b
-            w_fc = tf.get_variable(
-                shape=[curr_dim, 1], name='w_fc', dtype=tf.float32)
-            b_fc = tf.get_variable(shape=[1], name='b_fc', dtype=tf.float32)
-            logits = tf.nn.sigmoid(
-                tf.matmul(curr_input, w_fc) + b_fc)
-            #self.pred_label = tf.nn.softmax(logits) if self.num_class != 1 else  tf.nn.sigmoid(logits)
-            self.pred_labels = logits
-
+        encoded_queries, encoded_hypothesis, q_rep, h_rep = self.encoder.encode(
+            [self.queries_embedding, self.hypothesis_embedding],
+            [self.queries_length, self.hypothesis_length],
+            encoder_state_input=None
+        )
+        logits = self.decoder.decode([encoded_queries, encoded_hypothesis],
+                                     q_rep,
+                                     [self.queries_length, self.hypothesis_length],
+                                     self.labels)
+        self.pred_labels = tf.nn.sigmoid(logits)
         with tf.variable_scope("loss"):
             # loss
             #cross_entropy = tf.nn.softmax_cross_entropy_with_logits_v2(labels=self.labels, logits=logits) \
@@ -162,5 +229,6 @@ class MatchLSTM(object):
             #     labels=self.labels, logits=logits)
             # self.loss = tf.reduce_mean(cross_entropy)
             self.loss = tf.reduce_mean(
-                tf.log(1. + tf.exp(-(self.labels * self.pred_labels - (1 - self.labels) * self.pred_labels)))
+                tf.nn.sigmoid_cross_entropy_with_logits(labels=self.labels[:, tf.newaxis],
+                                                        logits=logits)
             )

@@ -96,22 +96,29 @@ def train_step(sess, model, train_op, data_batch):
 
 def test_step(sess, model, test_data, call_back):
     q_test, s_test, ql_test, sl_test, y_test = test_data
-    feed_dict = {
-        model.queries : q_test,
-        model.queries_length : ql_test,
-        model.hypothesis : s_test,
-        model.hypothesis_length : sl_test,
-        model.labels : y_test,
-        model.dropout : 1.0
-    }
-    loss, pred_label = sess.run([model.loss, model.pred_labels], feed_dict=feed_dict)
-    logs = call_back.on_epoch_end(pred_label.reshape((-1,1)))
-    print("In dev set: loss: {} MMR: {} MAP: {}".format(loss, logs['mrr'], logs['map']))
+    final_pred = []
+    final_loss = []
+    for i in range(0, len(y_test), FLAGS.batch_size):
+        feed_dict = {
+            model.queries : q_test[i:i+FLAGS.batch_size],
+            model.queries_length : ql_test[i:i+FLAGS.batch_size],
+            model.hypothesis : s_test[i:i+FLAGS.batch_size],
+            model.hypothesis_length : sl_test[i:i+FLAGS.batch_size],
+            model.labels : y_test[i:i+FLAGS.batch_size],
+            model.dropout : 1.0
+        }
+        loss, pred_label = sess.run([model.loss, model.pred_labels], feed_dict=feed_dict)
+        pred_label = list(pred_label.reshape((-1,1)))
+        final_pred += pred_label
+        final_loss += [loss] * len(pred_label)
+    print("loss in valid set :{}".format(np.mean(final_loss)))
+    logs = call_back.on_epoch_end(final_pred)
+    #print("In dev set: loss: {} MMR: {} MAP: {}".format(loss, logs['mrr'], logs['map']))
     return logs['map']
 
 
 if __name__ == "__main__":
-    trainf = 'data/train.txt' 
+    trainf = 'data/test.txt' 
     valf = 'data/test.txt'
     testf = 'data/dev.txt'
     best_map = 0
