@@ -1,11 +1,19 @@
 import tensorflow as tf
 #from attention_wrapper import _maybe_mask_score
 #from attention_wrapper import *
-from  tensorflow.contrib.seq2seq import AttentionWrapper
-from  tensorflow.contrib.seq2seq import BahdanauAttention
+from tensorflow.contrib.seq2seq import AttentionWrapper
+from tensorflow.contrib.seq2seq import BahdanauAttention
 from tensorflow.python import debug as tf_debug
 from tensorflow.python.ops import array_ops
 import numpy as np
+
+
+rnnact_dict = {
+    "tanh": tf.tanh,
+    "sigmoid": tf.sigmoid,
+    "relu": tf.nn.relu
+}
+
 
 def _reverse(input_, seq_lengths, seq_dim, batch_dim):
     if seq_lengths is not None:
@@ -40,18 +48,28 @@ class Encoder(object):
         with tf.variable_scope("encoded_question"):
             lstm_cell_question = tf.contrib.rnn.BasicLSTMCell(
                 self.hidden_size, state_is_tuple=True)
-            encoded_question, (q_rep, _) = tf.nn.dynamic_rnn(
-                lstm_cell_question, question, masks_question, dtype=tf.float32)  # (-1, Q, H)
-
+            # encoded_question, (q_rep, _) = tf.nn.dynamic_rnn(
+            # lstm_cell_question, question, masks_question, dtype=tf.float32)
+            # # (-1, Q, H)
+            (encoded_question_f,encoded_question_b),((q_rep_f,_),(q_rep_b,_)) = tf.nn.bidirectional_dynamic_rnn(
+                lstm_cell_question, lstm_cell_question, question, masks_question, dtype=tf.float32)
+            encoded_question = tf.concat((encoded_question_f, encoded_question_b), -1) # (-1, P, 2*H)
+            q_rep = tf.concat((q_rep_f, q_rep_b), -1)
         with tf.variable_scope("encoded_hypothesis"):
             lstm_cell_hypothesis = tf.contrib.rnn.BasicLSTMCell(
                 self.hidden_size, state_is_tuple=True)
-            encoded_hypothesis, (p_rep, _) = tf.nn.dynamic_rnn(
-                lstm_cell_hypothesis, hypothesis, masks_hypothesis, dtype=tf.float32)  # (-1, P, H)
+            #encoded_hypothesis, (p_rep, _) = tf.nn.dynamic_rnn(
+            #    lstm_cell_hypothesis, hypothesis, masks_hypothesis, dtype=tf.float32)  # (-1, P, H)
+            (encoded_hypothesis_f,encoded_hypothesis_b),((p_rep_f,_), (p_rep_b,_))=tf.nn.bidirectional_dynamic_rnn(
+                lstm_cell_hypothesis, lstm_cell_hypothesis, hypothesis, masks_hypothesis, dtype=tf.float32)
+            encoded_hypothesis = tf.concat((encoded_hypothesis_f, encoded_hypothesis_b), -1) # (-1, P, 2*H)
+            p_rep = tf.concat((p_rep_f, p_rep_b), -1)
 
         # outputs beyond sequence lengths are masked with 0s
-        encoded_question = tf.tanh(tf.layers.batch_normalization(encoded_question))
-        encoded_hypothesis = tf.tanh(tf.layers.batch_normalization(encoded_hypothesis))
+        encoded_question = tf.tanh(
+            tf.layers.batch_normalization(encoded_question))
+        encoded_hypothesis = tf.tanh(
+            tf.layers.batch_normalization(encoded_hypothesis))
         q_rep = tf.tanh(tf.layers.batch_normalization(q_rep))
         p_rep = tf.tanh(tf.layers.batch_normalization(p_rep))
         encoded_question = tf.nn.dropout(encoded_question, self.dropout)
@@ -96,7 +114,7 @@ class Decoder(object):
 
         output_attender = tf.concat(
             [output_attender_fw, output_attender_bw], axis=-1)  # (-1, P, 2*H)
-        
+
         return output_attender
 
     def run_match_lstm(self, encoded_rep, masks, return_sequence=False):
@@ -132,7 +150,8 @@ class Decoder(object):
                 output_attender_bw, masks_hypothesis, 1, 0)
         output_attender = tf.concat(
             [state_attender_fw[0].h, state_attender_bw[0].h], axis=-1)  # (-1, 2*H)
-        output_attender = tf.tanh(tf.layers.batch_normalization(output_attender))
+        output_attender = tf.tanh(
+            tf.layers.batch_normalization(output_attender))
         output_attender = tf.nn.dropout(output_attender, self.dropout)
         return output_attender
 
@@ -147,10 +166,10 @@ class Decoder(object):
                                 shape=[self.hidden_size * ddim],
                                 name='b_{}'.format(n))
             input_projection = tf.matmul(input_projection, w) + b
-            
+
         _, curr_dim = input_projection.get_shape()
         w_fc = tf.get_variable(
-                shape=[curr_dim, 1], name='w_fc', dtype=tf.float32)
+            shape=[curr_dim, 1], name='w_fc', dtype=tf.float32)
         b_fc = tf.get_variable(shape=[1], name='b_fc', dtype=tf.float32)
         output_projection = tf.layers.dense(input_projection,
                                             1,
@@ -185,7 +204,8 @@ class MatchLSTM(object):
         self.word_embedding = word_embedding
         self._add_placeholder()
         self.encoder = Encoder(self.config.hidden_layer, self.dropout)
-        self.decoder = Decoder(self.config.hidden_layer, self.Ddim, self.dropout)
+        self.decoder = Decoder(self.config.hidden_layer,
+                               self.Ddim, self.dropout)
         self._add_embedding()
         self._build_model()
 
@@ -243,14 +263,14 @@ class MatchLSTM(object):
             #     labels=self.labels, logits=logits)
             # self.loss = tf.reduce_mean(cross_entropy)
             self.loss = tf.reduce_mean(
-                #tf.log(1. + tf.exp(-(self.labels * tf.reshape(self.pred_labels,(-1,)) -
-                #                     (1 - self.labels) * tf.reshape(self.pred_labels, (-1,)))))
-            #)
+                # tf.log(1. + tf.exp(-(self.labels * tf.reshape(self.pred_labels,(-1,)) -
+                #                     (1 - self.labels) * tf.reshape(self.pred_
+                #)
                 tf.nn.sigmoid_cross_entropy_with_logits(labels=self.labels[:, tf.newaxis],
                                                         logits=logits)
-                )
-            vars   = tf.trainable_variables()
+            )
+            vars = tf.trainable_variables()
             print("Number of parameter is {}".format(len(vars)))
-            lossL2 = tf.add_n([ tf.nn.l2_loss(v) for v in vars
-                                if 'bias' not in v.name and "embedd" not in v.name]) * 1e-4
+            lossL2 = tf.add_n([tf.nn.l2_loss(v) for v in vars
+                               if 'bias' not in v.name and "embedd" not in v.name]) * 1e-4
             self.loss = self.loss + lossL2

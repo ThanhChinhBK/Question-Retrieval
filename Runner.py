@@ -17,6 +17,9 @@ tf.flags.DEFINE_integer("hidden_layer", 750, "")
 tf.flags.DEFINE_integer("pad", 100, "")
 tf.flags.DEFINE_float("dropout", 1 / 2, "")
 tf.flags.DEFINE_string("Ddim", "2", "")
+tf.flags.DEFINE_boolean("bidi", True, "")
+tf.flags.DEFINE_string("rnnact", "tanh", "")
+tf.flags.DEFINE_string("bidi_mode", "concatenate", "")
 # word vector config
 tf.flags.DEFINE_string(
     "embedding_path", "glove.6B.300d.txt", "word embedding path")
@@ -155,10 +158,10 @@ if __name__ == "__main__":
                            y_train[i:i+FLAGS.batch_size]
             ]
             loss = train_step(sess, model, train_op, data_batch)
-            t.set_description("train loss %.6f" % loss)
+            t.set_description("epoch %d: train loss %.6f" % (e, loss))
             t.refresh() 
         curr_map = test_step(sess, model, test_data, callback)
-        print("Best MAP:{} on epoch {0:0.5f}".format(best_map, best_epoch))
+        print("Best MAP:%.6f on epoch %d" %(best_map, best_epoch))
         if curr_map > best_map:
             best_map = curr_map
             best_epoch = e
