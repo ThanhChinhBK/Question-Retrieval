@@ -1,10 +1,11 @@
 import tensorflow as tf
-from attention_wrapper import _maybe_mask_score
-from attention_wrapper import *
+#from attention_wrapper import _maybe_mask_score
+#from attention_wrapper import *
+from  tensorflow.contrib.seq2seq import AttentionWrapper
+from  tensorflow.contrib.seq2seq import BahdanauAttention
 from tensorflow.python import debug as tf_debug
 from tensorflow.python.ops import array_ops
 import numpy as np
-
 
 def _reverse(input_, seq_lengths, seq_dim, batch_dim):
     if seq_lengths is not None:
@@ -18,9 +19,10 @@ def _reverse(input_, seq_lengths, seq_dim, batch_dim):
 class Encoder(object):
 
     # tf.contrib.layers.xavier_initializer):
-    def __init__(self, hidden_size, initializer=lambda: None):
+    def __init__(self, hidden_size, dropout, initializer=lambda: None):
         self.hidden_size = hidden_size
         self.init_weights = initializer
+        self.dropout = dropout
 
     def encode(self, inputs, masks, encoder_state_input=None):
         """
@@ -48,15 +50,24 @@ class Encoder(object):
                 lstm_cell_hypothesis, hypothesis, masks_hypothesis, dtype=tf.float32)  # (-1, P, H)
 
         # outputs beyond sequence lengths are masked with 0s
+        encoded_question = tf.tanh(tf.layers.batch_normalization(encoded_question))
+        encoded_hypothesis = tf.tanh(tf.layers.batch_normalization(encoded_hypothesis))
+        q_rep = tf.tanh(tf.layers.batch_normalization(q_rep))
+        p_rep = tf.tanh(tf.layers.batch_normalization(p_rep))
+        encoded_question = tf.nn.dropout(encoded_question, self.dropout)
+        encoded_hypothesis = tf.nn.dropout(encoded_hypothesis, self.dropout)
+        q_rep = tf.nn.dropout(q_rep, self.dropout)
+        p_rep = tf.nn.dropout(p_rep, self.dropout)
         return encoded_question, encoded_hypothesis, q_rep, p_rep
 
 
 class Decoder(object):
 
-    def __init__(self, hidden_size, Ddim, initializer=lambda: None):
+    def __init__(self, hidden_size, Ddim, dropout, initializer=lambda: None):
         self.hidden_size = hidden_size
         self.init_weights = initializer
         self.Ddim = Ddim
+        self.dropout = dropout
 
     def run_lstm(self, encoded_rep, q_rep, masks):
         encoded_question, encoded_hypothesis = encoded_rep
@@ -85,9 +96,10 @@ class Decoder(object):
 
         output_attender = tf.concat(
             [output_attender_fw, output_attender_bw], axis=-1)  # (-1, P, 2*H)
+        
         return output_attender
 
-    def run_match_lstm(self, encoded_rep, masks):
+    def run_match_lstm(self, encoded_rep, masks, return_sequence=False):
         encoded_question, encoded_hypothesis = encoded_rep
         masks_question, masks_hypothesis = masks
 
@@ -105,7 +117,7 @@ class Decoder(object):
             lstm_attender = AttentionWrapper(
                 cell, attention_mechanism_match_lstm,
                 output_attention=False,
-                attention_input_fn=match_lstm_cell_attention_fn)
+                cell_input_fn=match_lstm_cell_attention_fn)
 
             # we don't mask the hypothesis because masking the memories will be
             # handled by the pointerNet
@@ -120,6 +132,8 @@ class Decoder(object):
                 output_attender_bw, masks_hypothesis, 1, 0)
         output_attender = tf.concat(
             [state_attender_fw[0].h, state_attender_bw[0].h], axis=-1)  # (-1, 2*H)
+        output_attender = tf.tanh(tf.layers.batch_normalization(output_attender))
+        output_attender = tf.nn.dropout(output_attender, self.dropout)
         return output_attender
 
     def run_projection(self, state_attender):
@@ -169,9 +183,9 @@ class MatchLSTM(object):
         self.Ddim = [int(x) for x in self.config.Ddim.split()]
         self.vocab = vocab
         self.word_embedding = word_embedding
-        self.encoder = Encoder(self.config.hidden_layer)
-        self.decoder = Decoder(self.config.hidden_layer, self.Ddim)
         self._add_placeholder()
+        self.encoder = Encoder(self.config.hidden_layer, self.dropout)
+        self.decoder = Decoder(self.config.hidden_layer, self.Ddim, self.dropout)
         self._add_embedding()
         self._build_model()
 
@@ -229,6 +243,14 @@ class MatchLSTM(object):
             #     labels=self.labels, logits=logits)
             # self.loss = tf.reduce_mean(cross_entropy)
             self.loss = tf.reduce_mean(
+                #tf.log(1. + tf.exp(-(self.labels * tf.reshape(self.pred_labels,(-1,)) -
+                #                     (1 - self.labels) * tf.reshape(self.pred_labels, (-1,)))))
+            #)
                 tf.nn.sigmoid_cross_entropy_with_logits(labels=self.labels[:, tf.newaxis],
                                                         logits=logits)
-            )
+                )
+            vars   = tf.trainable_variables()
+            print("Number of parameter is {}".format(len(vars)))
+            lossL2 = tf.add_n([ tf.nn.l2_loss(v) for v in vars
+                                if 'bias' not in v.name and "embedd" not in v.name]) * 1e-4
+            self.loss = self.loss + lossL2

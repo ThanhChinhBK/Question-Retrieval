@@ -9,7 +9,7 @@ from nltk.tokenize import word_tokenize
 from tqdm import *
 
 # Training hyperparameter config
-tf.flags.DEFINE_integer("batch_size", 160, "batch size")
+tf.flags.DEFINE_integer("batch_size", 64, "batch size")
 tf.flags.DEFINE_integer("epochs", 160, "epochs")
 tf.flags.DEFINE_float("learning_rate", 1e-4, "learning rate")
 # LSTM config
@@ -19,7 +19,7 @@ tf.flags.DEFINE_float("dropout", 1 / 2, "")
 tf.flags.DEFINE_string("Ddim", "2", "")
 # word vector config
 tf.flags.DEFINE_string(
-    "embedding_path", "glove.6B.50d.txt", "word embedding path")
+    "embedding_path", "glove.6B.300d.txt", "word embedding path")
 # Tensorflow config
 tf.flags.DEFINE_integer("num_checkpoints", 5,
                         "Number of checkpoints to store (default: 5)")
@@ -42,7 +42,7 @@ def load_data_from_file(dsfile):
             qtext = l.strip().split("\t")[0]
             stext = l.strip().split("\t")[1]
             q_tok = word_tokenize(qtext.lower())
-            s_tok = word_tokenize(stext)
+            s_tok = word_tokenize(stext.lower())
             q.append(q_tok)
             q_l.append(min(len(q_tok), FLAGS.pad))
             sents.append(s_tok)
@@ -117,7 +117,7 @@ def test_step(sess, model, test_data, call_back):
 
 
 if __name__ == "__main__":
-    trainf = 'data/test.txt' 
+    trainf = 'data/train.txt' 
     valf = 'data/test.txt'
     testf = 'data/dev.txt'
     best_map = 0
@@ -127,11 +127,11 @@ if __name__ == "__main__":
     print("Load Glove")
     emb = DataUtils.GloVe(FLAGS.embedding_path)
     session_conf = tf.ConfigProto(
-    allow_soft_placement=FLAGS.allow_soft_placement,
-    log_device_placement=FLAGS.log_device_placement)
+        allow_soft_placement=FLAGS.allow_soft_placement,
+        log_device_placement=FLAGS.log_device_placement)
     sess = tf.Session(config=session_conf) 
     model = MatchLSTM(FLAGS, vocab, emb)
-    train_op = tf.train.AdadeltaOptimizer(FLAGS.learning_rate).minimize(model.loss)
+    train_op = tf.train.AdamOptimizer(FLAGS.learning_rate).minimize(model.loss)
     checkpoint_dir = os.path.abspath(os.path.join(FLAGS.out_dir, "checkpoints"))
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
@@ -158,7 +158,7 @@ if __name__ == "__main__":
             t.set_description("train loss %.6f" % loss)
             t.refresh() 
         curr_map = test_step(sess, model, test_data, callback)
-        print("Best MAP:{} on epoch {}".format(best_map, best_epoch))
+        print("Best MAP:{} on epoch {0:0.5f}".format(best_map, best_epoch))
         if curr_map > best_map:
             best_map = curr_map
             best_epoch = e
