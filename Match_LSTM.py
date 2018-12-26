@@ -86,6 +86,16 @@ class Decoder(object):
         self.init_weights = initializer
         self.Ddim = Ddim
         self.dropout = dropout
+        w_sim_1 = tf.get_variable(shape=[self.hidden_size * 4, self.hidden_size * 8],
+                                  name="w_sim_1", dtype=tf.float32)
+        w_sim_2 = tf.get_variable(shape=[self.hidden_size * 8, self.hidden_size * 4],
+                                  name="w_sim_2", dtype=tf.float32)
+        b_sim_1 = tf.get_variable(shape=[self.hidden_size * 8],
+                                  name="b_sim_1", dtype=tf.float32)
+        b_sim_2 = tf.get_variable(shape=[self.hidden_size * 4],
+                                  name="b_sim_2", dtype=tf.float32)
+        self.mlp_w = [w_sim_1, w_sim_2]
+        self.mlp_b = [b_sim_1, b_sim_2]
 
     def run_lstm(self, encoded_rep, q_rep, masks):
         encoded_question, encoded_hypothesis = encoded_rep
@@ -117,12 +127,21 @@ class Decoder(object):
 
         return output_attender
 
+    def mlp_layer(self, curr_input, state):
+        sum_vec = tf.add(curr_input, state)
+        mul_vec = tf.add(curr_input, state)
+        input_mlp = tf.concat((sum_vec, mul_vec),-1)
+        hid_mlp = tf.tanh(tf.add(tf.matmul(input_mlp, self.mlp_w[0]), self.mlp_b[0]))
+        output_mlp = tf.tanh(tf.add(tf.matmul(hid_mlp, self.mlp_w[1]), self.mlp_b[1]))
+        return output_mlp
+
     def run_match_lstm(self, encoded_rep, masks, return_sequence=False):
         encoded_question, encoded_hypothesis = encoded_rep
         masks_question, masks_hypothesis = masks
 
-        match_lstm_cell_attention_fn = lambda curr_input, state: tf.concat(
-            [curr_input, state], axis=-1)
+        #match_lstm_cell_attention_fn = lambda curr_input, state: tf.concat(
+        #    [curr_input, state], axis=-1)
+        match_lstm_cell_attention_fn = lambda curr_input, state: self.mlp_layer(curr_input, state)
         query_depth = encoded_question.get_shape()[-1]
 
         # output attention is false because we want to output the cell output
@@ -131,7 +150,7 @@ class Decoder(object):
             attention_mechanism_match_lstm = BahdanauAttention(
                 query_depth, encoded_question, memory_sequence_length=masks_question)
             cell = tf.contrib.rnn.BasicLSTMCell(
-                self.hidden_size, state_is_tuple=True)
+                self.hidden_size*2, state_is_tuple=True)
             lstm_attender = AttentionWrapper(
                 cell, attention_mechanism_match_lstm,
                 output_attention=False,

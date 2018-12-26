@@ -120,9 +120,9 @@ def test_step(sess, model, test_data, call_back):
 
 
 if __name__ == "__main__":
-    trainf = 'data/train.txt' 
-    valf = 'data/test.txt'
-    testf = 'data/dev.txt'
+    trainf = 'data/train2016.txt' 
+    valf = 'data/test2016.txt'
+    testf = 'data/dev2016.txt'
     best_map = 0
     best_epoch = 0
     print("Load data")
