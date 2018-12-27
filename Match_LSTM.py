@@ -14,6 +14,31 @@ rnnact_dict = {
     "relu": tf.nn.relu
 }
 
+def cnnsum(inputs, dropout, cnnact=tf.nn.relu,
+           cdim={1: 1/2, 2: 1/2, 3: 1/2, 4: 1/2, 5: 1/2, 6: 1/2, 7: 1/2},
+           input_dim=300, pad=100, pfx=''):
+    si_cnn_res_list = []
+    tot_len = 0
+    for fl, cd in cdim.items():
+        nb_filter = int(input_dim*cd)
+        si_conv = tf.layers.conv1d(name=pfx+'conv%d'%(fl), inputs=inputs,
+                                   kernel_size=fl, filters=nb_filter)
+        si_cnn_one = cnnact(tf.layers.batch_normalization(si_conv))
+        
+        si_pool_one =  tf.layers.max_pooling1d(si_cnn_one,
+                                               pool_size=int(pad-fl+1),
+                                               strides=int(pad-fl+1), 
+                                               name=pfx+'pool%d'%(fl))
+
+        si_out_one =  tf.contrib.layers.flatten(si_pool_one)
+
+        si_cnn_res_list.append(si_out_one)
+    
+        tot_len += nb_filter
+
+    si_cnn = tf.nn.dropout(tf.concat(si_cnn_res_list, -1), dropout)
+
+    return si_cnn
 
 def _reverse(input_, seq_lengths, seq_dim, batch_dim):
     if seq_lengths is not None:
@@ -167,8 +192,12 @@ class Decoder(object):
                 lstm_attender, reverse_encoded_hypothesis, dtype=tf.float32, scope="rnn")
             output_attender_bw = _reverse(
                 output_attender_bw, masks_hypothesis, 1, 0)
-        output_attender = tf.concat(
-            [state_attender_fw[0].h, state_attender_bw[0].h], axis=-1)  # (-1, 2*H)
+        if return_sequence:
+            output_attender = tf.concat(
+                [output_attender_fw, output_attender_bw], -1)
+        else:
+            output_attender = tf.concat(
+                [state_attender_fw[0].h, state_attender_bw[0].h], axis=-1)  # (-1, 2*H)
         output_attender = tf.tanh(
             tf.layers.batch_normalization(output_attender))
         output_attender = tf.nn.dropout(output_attender, self.dropout)
@@ -208,8 +237,9 @@ class Decoder(object):
         :return: logits: for each word in hypothesis the probability that it is the start word and end word.
         """
 
-        output_attender = self.run_match_lstm(encoded_rep, masks)
-        logits = self.run_projection(output_attender)
+        output_attender = self.run_match_lstm(encoded_rep, masks, True)
+        output_cnn = cnnsum(output_attender, self.dropout)
+        logits = self.run_projection(output_cnn)
 
         return logits
 

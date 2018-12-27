@@ -13,7 +13,7 @@ tf.flags.DEFINE_integer("batch_size", 64, "batch size")
 tf.flags.DEFINE_integer("epochs", 160, "epochs")
 tf.flags.DEFINE_float("learning_rate", 1e-4, "learning rate")
 # LSTM config
-tf.flags.DEFINE_integer("hidden_layer", 750, "")
+tf.flags.DEFINE_integer("hidden_layer", 300, "")
 tf.flags.DEFINE_integer("pad", 100, "")
 tf.flags.DEFINE_float("dropout", 1 / 2, "")
 tf.flags.DEFINE_string("Ddim", "2", "")
@@ -22,7 +22,7 @@ tf.flags.DEFINE_string("rnnact", "tanh", "")
 tf.flags.DEFINE_string("bidi_mode", "concatenate", "")
 # word vector config
 tf.flags.DEFINE_string(
-    "embedding_path", "glove.6B.300d.txt", "word embedding path")
+    "embedding_path", "glove.6B.50d.txt", "word embedding path")
 # Tensorflow config
 tf.flags.DEFINE_integer("num_checkpoints", 5,
                         "Number of checkpoints to store (default: 5)")
