@@ -111,17 +111,7 @@ class Decoder(object):
         self.init_weights = initializer
         self.Ddim = Ddim
         self.dropout = dropout
-        w_sim_1 = tf.get_variable(shape=[self.hidden_size * 4, self.hidden_size * 8],
-                                  name="w_sim_1", dtype=tf.float32)
-        w_sim_2 = tf.get_variable(shape=[self.hidden_size * 8, self.hidden_size * 4],
-                                  name="w_sim_2", dtype=tf.float32)
-        b_sim_1 = tf.get_variable(shape=[self.hidden_size * 8],
-                                  name="b_sim_1", dtype=tf.float32)
-        b_sim_2 = tf.get_variable(shape=[self.hidden_size * 4],
-                                  name="b_sim_2", dtype=tf.float32)
-        self.mlp_w = [w_sim_1, w_sim_2]
-        self.mlp_b = [b_sim_1, b_sim_2]
-
+        
     def run_lstm(self, encoded_rep, q_rep, masks):
         encoded_question, encoded_hypothesis = encoded_rep
         masks_question, masks_hypothesis = masks
@@ -152,21 +142,13 @@ class Decoder(object):
 
         return output_attender
 
-    def mlp_layer(self, curr_input, state):
-        sum_vec = tf.add(curr_input, state)
-        mul_vec = tf.add(curr_input, state)
-        input_mlp = tf.concat((sum_vec, mul_vec),-1)
-        hid_mlp = tf.tanh(tf.add(tf.matmul(input_mlp, self.mlp_w[0]), self.mlp_b[0]))
-        output_mlp = tf.tanh(tf.add(tf.matmul(hid_mlp, self.mlp_w[1]), self.mlp_b[1]))
-        return output_mlp
-
     def run_match_lstm(self, encoded_rep, masks, return_sequence=False):
         encoded_question, encoded_hypothesis = encoded_rep
         masks_question, masks_hypothesis = masks
 
-        #match_lstm_cell_attention_fn = lambda curr_input, state: tf.concat(
-        #    [curr_input, state], axis=-1)
-        match_lstm_cell_attention_fn = lambda curr_input, state: self.mlp_layer(curr_input, state)
+        match_lstm_cell_attention_fn = lambda curr_input, state: tf.concat(
+            [curr_input, state], axis=-1)
+        
         query_depth = encoded_question.get_shape()[-1]
 
         # output attention is false because we want to output the cell output
@@ -238,8 +220,9 @@ class Decoder(object):
         """
 
         output_attender = self.run_match_lstm(encoded_rep, masks, True)
-        output_cnn = cnnsum(output_attender, self.dropout)
-        logits = self.run_projection(output_cnn)
+        #output_cnn = cnnsum(output_attender, self.dropout)
+        output_maxpool = tf.reduce_max(output_attender, 2)
+        logits = self.run_projection(output_maxpool)
 
         return logits
 
