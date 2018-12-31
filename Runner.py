@@ -2,6 +2,7 @@ import tensorflow as tf
 import numpy as np
 import datetime
 from Match_LSTM import MatchLSTM
+from Rnet import Rnet
 import json
 import os
 import DataUtils
@@ -12,14 +13,16 @@ from tqdm import *
 tf.flags.DEFINE_integer("batch_size", 64, "batch size")
 tf.flags.DEFINE_integer("epochs", 160, "epochs")
 tf.flags.DEFINE_float("learning_rate", 1e-4, "learning rate")
+tf.flags.DEFINE_float("grad_clip", 5.0, "")
 # LSTM config
 tf.flags.DEFINE_integer("hidden_layer", 300, "")
 tf.flags.DEFINE_integer("pad", 100, "")
-tf.flags.DEFINE_float("dropout", 1 / 2, "")
+tf.flags.DEFINE_float("dropout", 0.7, "")
 tf.flags.DEFINE_string("Ddim", "2", "")
 tf.flags.DEFINE_boolean("bidi", True, "")
 tf.flags.DEFINE_string("rnnact", "tanh", "")
 tf.flags.DEFINE_string("bidi_mode", "concatenate", "")
+tf.flags.DEFINE_boolean("use_cudnn", True, "")
 # word vector config
 tf.flags.DEFINE_string(
     "embedding_path", "glove.6B.50d.txt", "word embedding path")
@@ -83,7 +86,7 @@ def load_data(trainf, valf, testf):
     inp_test, y_test = load_set(testf, vocab=vocab, iseval=True)
 
 
-def train_step(sess, model, train_op, data_batch):
+def train_step(sess, model, data_batch):
     q_batch, s_batch, ql_batch, sl_batch, y_batch = data_batch
     feed_dict = {
         model.queries : q_batch,
@@ -91,9 +94,9 @@ def train_step(sess, model, train_op, data_batch):
         model.hypothesis : s_batch,
         model.hypothesis_length : sl_batch,
         model.dropout : FLAGS.dropout,
-        model.labels : y_batch
+        model.y : y_batch
     }
-    _, loss = sess.run([train_op, model.loss], feed_dict=feed_dict)
+    _, loss = sess.run([model.train_op, model.loss], feed_dict=feed_dict)
     return loss
 
 def test_step(sess, model, test_data, call_back):
@@ -106,10 +109,10 @@ def test_step(sess, model, test_data, call_back):
             model.queries_length : ql_test[i:i+FLAGS.batch_size],
             model.hypothesis : s_test[i:i+FLAGS.batch_size],
             model.hypothesis_length : sl_test[i:i+FLAGS.batch_size],
-            model.labels : y_test[i:i+FLAGS.batch_size],
+            model.y : y_test[i:i+FLAGS.batch_size],
             model.dropout : 1.0
         }
-        loss, pred_label = sess.run([model.loss, model.pred_labels], feed_dict=feed_dict)
+        loss, pred_label = sess.run([model.loss, model.yp], feed_dict=feed_dict)
         pred_label = list(pred_label.reshape((-1,1)))
         final_pred += pred_label
         final_loss += [loss] * len(pred_label)
@@ -133,8 +136,8 @@ if __name__ == "__main__":
         allow_soft_placement=FLAGS.allow_soft_placement,
         log_device_placement=FLAGS.log_device_placement)
     sess = tf.Session(config=session_conf) 
-    model = MatchLSTM(FLAGS, vocab, emb)
-    train_op = tf.train.AdamOptimizer(FLAGS.learning_rate).minimize(model.loss)
+    model = Rnet(FLAGS, vocab, emb)
+    
     checkpoint_dir = os.path.abspath(os.path.join(FLAGS.out_dir, "checkpoints"))
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
@@ -157,7 +160,7 @@ if __name__ == "__main__":
                            inp_tr['s_l'][i:i+FLAGS.batch_size],
                            y_train[i:i+FLAGS.batch_size]
             ]
-            loss = train_step(sess, model, train_op, data_batch)
+            loss = train_step(sess, model, data_batch)
             t.set_description("epoch %d: train loss %.6f" % (e, loss))
             t.refresh() 
         curr_map = test_step(sess, model, test_data, callback)
