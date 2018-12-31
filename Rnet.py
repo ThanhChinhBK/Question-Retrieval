@@ -20,7 +20,9 @@ class Rnet(object):
             dtype=tf.float32, trainable=False,
             initializer=tf.constant(self.config.learning_rate)
         )
-        self.opt = tf.train.AdadeltaOptimizer(
+        #self.train_op = tf.train.AdamOptimizer(
+        #    learning_rate=self.lr).minimize(self.loss)
+        self.opt = tf.train.AdamOptimizer(
             learning_rate=self.lr, epsilon=1e-6)
         grads = self.opt.compute_gradients(self.loss)
         gradients, variables = zip(*grads)
@@ -125,6 +127,11 @@ class Rnet(object):
             print(self.y.get_shape())
             self.loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
                 labels=tf.reshape(self.y,(-1,1)), logits=output))
+            vars = tf.trainable_variables()
+            print("Number of parameter is {}".format(len(vars)))
+            lossL2 = tf.add_n([tf.nn.l2_loss(v) for v in vars
+                               if 'bias' not in v.name and "embedd" not in v.name]) * 1e-4
+            self.loss = self.loss + lossL2
             
 
     def get_loss(self):

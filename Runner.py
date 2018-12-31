@@ -17,7 +17,7 @@ tf.flags.DEFINE_float("grad_clip", 5.0, "")
 # LSTM config
 tf.flags.DEFINE_integer("hidden_layer", 300, "")
 tf.flags.DEFINE_integer("pad", 100, "")
-tf.flags.DEFINE_float("dropout", 0.7, "")
+tf.flags.DEFINE_float("dropout", 0.3, "")
 tf.flags.DEFINE_string("Ddim", "2", "")
 tf.flags.DEFINE_boolean("bidi", True, "")
 tf.flags.DEFINE_string("rnnact", "tanh", "")
@@ -25,7 +25,7 @@ tf.flags.DEFINE_string("bidi_mode", "concatenate", "")
 tf.flags.DEFINE_boolean("use_cudnn", True, "")
 # word vector config
 tf.flags.DEFINE_string(
-    "embedding_path", "glove.6B.50d.txt", "word embedding path")
+    "embedding_path", "glove.6B.300d.txt", "word embedding path")
 # Tensorflow config
 tf.flags.DEFINE_integer("num_checkpoints", 5,
                         "Number of checkpoints to store (default: 5)")
@@ -123,9 +123,9 @@ def test_step(sess, model, test_data, call_back):
 
 
 if __name__ == "__main__":
-    trainf = 'data/train2016.txt' 
-    valf = 'data/test2016.txt'
-    testf = 'data/dev2016.txt'
+    trainf = 'data/train.txt' 
+    valf = 'data/test.txt'
+    testf = 'data/dev.txt'
     best_map = 0
     best_epoch = 0
     print("Load data")
