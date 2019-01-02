@@ -206,7 +206,7 @@ class Decoder(object):
                                             name="projection_final")
         return output_projection
 
-    def decode(self, encoded_rep, q_rep, masks, labels):
+    def decode(self, encoded_rep, q_rep, masks):
         """
         takes in encoded_rep
         and output a probability estimation over
@@ -240,6 +240,8 @@ class MatchLSTM(object):
                                self.Ddim, self.dropout)
         self._add_embedding()
         self._build_model()
+        self.train_op = tf.train.AdamOptimizer(
+            learning_rate=self.config.learning_rate).minimize(self.loss)
 
     def _add_placeholder(self):
         with tf.variable_scope("placeholder"):
@@ -251,7 +253,7 @@ class MatchLSTM(object):
                 tf.int32, [None, self.config.pad], "hypothesis")
             self.hypothesis_length = tf.placeholder(
                 tf.int32, [None], "hypothesis_length")
-            self.labels = tf.placeholder(
+            self.y = tf.placeholder(
                 tf.float32, [None], "labels")
             self.dropout = tf.placeholder(
                 tf.float32, [], "dropout")
@@ -282,9 +284,8 @@ class MatchLSTM(object):
         )
         logits = self.decoder.decode([encoded_queries, encoded_hypothesis],
                                      q_rep,
-                                     [self.queries_length, self.hypothesis_length],
-                                     self.labels)
-        self.pred_labels = tf.nn.sigmoid(logits)
+                                     [self.queries_length, self.hypothesis_length])
+        self.yp = tf.nn.sigmoid(logits)
         with tf.variable_scope("loss"):
             # loss
             #cross_entropy = tf.nn.softmax_cross_entropy_with_logits_v2(labels=self.labels, logits=logits) \
@@ -298,7 +299,7 @@ class MatchLSTM(object):
                 # tf.log(1. + tf.exp(-(self.labels * tf.reshape(self.pred_labels,(-1,)) -
                 #                     (1 - self.labels) * tf.reshape(self.pred_
                 #)
-                tf.nn.sigmoid_cross_entropy_with_logits(labels=self.labels[:, tf.newaxis],
+                tf.nn.sigmoid_cross_entropy_with_logits(labels=self.y[:, tf.newaxis],
                                                         logits=logits)
             )
             vars = tf.trainable_variables()
