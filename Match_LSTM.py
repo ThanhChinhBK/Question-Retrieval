@@ -185,25 +185,23 @@ class Decoder(object):
         output_attender = tf.nn.dropout(output_attender, self.dropout)
         return output_attender
 
-    def run_projection(self, state_attender):
-        input_projection = state_attender
-        for n, ddim in enumerate(self.Ddim):
-            _, curr_dim = input_projection.get_shape()
-            w = tf.get_variable(dtype=tf.float32,
-                                shape=[curr_dim, self.hidden_size * ddim],
-                                name='w_{}'.format(n))
-            b = tf.get_variable(dtype=tf.float32,
-                                shape=[self.hidden_size * ddim],
-                                name='b_{}'.format(n))
-            input_projection = tf.matmul(input_projection, w) + b
+    def run_projection(self, state_attender, output_dim, scope="projection"):
+        with tf.variable_scope(scope):
+            input_projection = state_attender
+            for n, ddim in enumerate(self.Ddim):
+                _, curr_dim = input_projection.get_shape()
+                w = tf.get_variable(dtype=tf.float32,
+                                    shape=[curr_dim, self.hidden_size * ddim],
+                                    name='w_{}'.format(n))
+                b = tf.get_variable(dtype=tf.float32,
+                                    shape=[self.hidden_size * ddim],
+                                    name='b_{}'.format(n))
+                input_projection = tf.matmul(input_projection, w) + b
 
-        _, curr_dim = input_projection.get_shape()
-        w_fc = tf.get_variable(
-            shape=[curr_dim, 1], name='w_fc', dtype=tf.float32)
-        b_fc = tf.get_variable(shape=[1], name='b_fc', dtype=tf.float32)
-        output_projection = tf.layers.dense(input_projection,
-                                            1,
-                                            name="projection_final")
+            _, curr_dim = input_projection.get_shape()
+            output_projection = tf.layers.dense(input_projection,
+                                                output_dim,
+                                                name="projection_final")
         return output_projection
 
     def decode(self, encoded_rep, q_rep, masks):
@@ -221,10 +219,10 @@ class Decoder(object):
 
         output_attender = self.run_match_lstm(encoded_rep, masks, True)
         #output_cnn = cnnsum(output_attender, self.dropout)
-        output_maxpool = tf.reduce_max(output_attender, 2)
-        logits = self.run_projection(output_maxpool)
-
-        return logits
+        output_maxpool = tf.reduce_max(output_attender, 1)
+        logits = self.run_projection(output_maxpool, 1)
+        logits_SNLI = self.run_projection(output_maxpool, 3, "SNLI_projection")
+        return logits, logits_SNLI
 
 
 class MatchLSTM(object):
@@ -242,6 +240,8 @@ class MatchLSTM(object):
         self._build_model()
         self.train_op = tf.train.AdamOptimizer(
             learning_rate=self.config.learning_rate).minimize(self.loss)
+        self.train_op_SNLI = tf.train.AdamOptimizer(
+            learning_rate=self.config.learning_rate).minimize(self.loss_SNLI)
 
     def _add_placeholder(self):
         with tf.variable_scope("placeholder"):
@@ -255,6 +255,8 @@ class MatchLSTM(object):
                 tf.int32, [None], "hypothesis_length")
             self.y = tf.placeholder(
                 tf.float32, [None], "labels")
+            self.y_SNLI = tf.placeholder(
+                tf.float32, [None, 3], "labels_SNLI")
             self.dropout = tf.placeholder(
                 tf.float32, [], "dropout")
 
@@ -282,10 +284,12 @@ class MatchLSTM(object):
             [self.queries_length, self.hypothesis_length],
             encoder_state_input=None
         )
-        logits = self.decoder.decode([encoded_queries, encoded_hypothesis],
+        logits, logits_SNLI = self.decoder.decode([encoded_queries, encoded_hypothesis],
                                      q_rep,
                                      [self.queries_length, self.hypothesis_length])
+        print(logits_SNLI.get_shape())
         self.yp = tf.nn.sigmoid(logits)
+        self.yp_SNLI = tf.argmax(logits_SNLI, -1)
         with tf.variable_scope("loss"):
             # loss
             #cross_entropy = tf.nn.softmax_cross_entropy_with_logits_v2(labels=self.labels, logits=logits) \
@@ -306,4 +310,8 @@ class MatchLSTM(object):
             print("Number of parameter is {}".format(len(vars)))
             lossL2 = tf.add_n([tf.nn.l2_loss(v) for v in vars
                                if 'bias' not in v.name and "embedd" not in v.name]) * 1e-4
-            self.loss = self.loss + lossL2
+            self.loss = self.loss #+ lossL2
+            self.loss_SNLI = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(
+                labels=self.y_SNLI,
+                logits = logits_SNLI
+            ))

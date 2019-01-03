@@ -273,6 +273,12 @@ class Vocabulary:
 
         self.embcache = dict()
 
+    def update(self, sentences):
+        for s in sentences:
+            for t in s:
+                self.add_word(t)
+        print('Vocabulary of %d words' % (len(self.word_idx)))
+
     def add_word(self, word):
         if word not in self.word_idx:
             self.word_idx[word] = len(self.word_idx)
