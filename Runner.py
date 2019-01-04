@@ -103,9 +103,9 @@ def SNLI_train_step(sess, model, data_batch):
     y_batch_onehot = np.eye(3)[y_batch]
     feed_dict = {
         model.queries : q_batch,
-        model.queries_length : ql_batch,
+        #model.queries_length : ql_batch,
         model.hypothesis : s_batch,
-        model.hypothesis_length : sl_batch,
+        #model.hypothesis_length : sl_batch,
         model.dropout : FLAGS.dropout,
         model.y_SNLI : y_batch_onehot
     }
@@ -116,9 +116,9 @@ def train_step(sess, model, data_batch):
     q_batch, s_batch, ql_batch, sl_batch, y_batch = data_batch
     feed_dict = {
         model.queries : q_batch,
-        model.queries_length : ql_batch,
+        #model.queries_length : ql_batch,
         model.hypothesis : s_batch,
-        model.hypothesis_length : sl_batch,
+        #model.hypothesis_length : sl_batch,
         model.dropout : FLAGS.dropout,
         model.y : y_batch
     }
@@ -134,9 +134,9 @@ def SNLI_test_step(sess, model, test_data):
         y_test_onehot = np.eye(3)[y_test[i:i+FLAGS.batch_size]]
         feed_dict = {
             model.queries : q_test[i:i+FLAGS.batch_size],
-            model.queries_length : ql_test[i:i+FLAGS.batch_size],
+            #model.queries_length : ql_test[i:i+FLAGS.batch_size],
             model.hypothesis : s_test[i:i+FLAGS.batch_size],
-            model.hypothesis_length : sl_test[i:i+FLAGS.batch_size],
+            #model.hypothesis_length : sl_test[i:i+FLAGS.batch_size],
             model.y_SNLI : y_test_onehot,
             model.dropout : 1.0
         }
@@ -157,9 +157,9 @@ def SemEval_test_step(sess, model, test_data, call_back):
     for i in range(0, len(y_test), FLAGS.batch_size):
         feed_dict = {
             model.queries : q_test[i:i+FLAGS.batch_size],
-            model.queries_length : ql_test[i:i+FLAGS.batch_size],
+            #model.queries_length : ql_test[i:i+FLAGS.batch_size],
             model.hypothesis : s_test[i:i+FLAGS.batch_size],
-            model.hypothesis_length : sl_test[i:i+FLAGS.batch_size],
+            #model.hypothesis_length : sl_test[i:i+FLAGS.batch_size],
             model.y : y_test[i:i+FLAGS.batch_size],
             model.dropout : 1.0
         }

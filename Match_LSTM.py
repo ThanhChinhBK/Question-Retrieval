@@ -32,18 +32,20 @@ class MatchLSTM(object):
         with tf.variable_scope("placeholder"):
             self.queries = tf.placeholder(
                 tf.int32, [None, self.config.pad], "queries")
-            self.queries_length = tf.placeholder(
-                tf.int32, [None], "queries_length")
+            #self.queries_length = tf.placeholder(
+            #    tf.int32, [None], "queries_length")
             self.hypothesis = tf.placeholder(
                 tf.int32, [None, self.config.pad], "hypothesis")
-            self.hypothesis_length = tf.placeholder(
-                tf.int32, [None], "hypothesis_length")
+            #self.hypothesis_length = tf.placeholder(
+            #    tf.int32, [None], "hypothesis_length")
             self.y = tf.placeholder(
                 tf.float32, [None], "labels")
             self.y_SNLI = tf.placeholder(
                 tf.float32, [None, 3], "labels_SNLI")
             self.dropout = tf.placeholder(
                 tf.float32, [], "dropout")
+            self.queries_length = tf.cast(tf.cast(self.queries, tf.bool), tf.int32)
+            self.hypothesis_length = tf.cast(tf.cast(self.hypothesis, tf.bool), tf.int32)
 
     def _add_embedding(self):
         with tf.device("/cpu:0"):

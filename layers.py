@@ -80,6 +80,8 @@ class Encoder(object):
 
         question, hypothesis = inputs
         masks_question, masks_hypothesis = masks
+        masks_question = tf.reduce_sum(masks_question, -1)
+        masks_hypothesis = tf.reduce_sum(masks_hypothesis, -1)
 
         # read hypothesis conditioned upon the question
         with tf.variable_scope("encoded_question"):
@@ -123,41 +125,11 @@ class Decoder(object):
         self.init_weights = initializer
         self.Ddim = Ddim
         self.dropout = dropout
-        
-    def run_lstm(self, encoded_rep, q_rep, masks):
-        encoded_question, encoded_hypothesis = encoded_rep
-        masks_question, masks_hypothesis = masks
-
-        q_rep = tf.expand_dims(q_rep, 1)  # (batch_size, 1, D)
-        encoded_hypothesis_shape = tf.shape(encoded_hypothesis)[1]
-        q_rep = tf.tile(q_rep, [1, encoded_hypothesis_shape, 1])
-
-        mixed_question_hypothesis_rep = tf.concat(
-            [encoded_hypothesis, q_rep], axis=-1)
-
-        with tf.variable_scope("lstm_"):
-            cell = tf.contrib.rnn.BasicLSTMCell(
-                self.hidden_size, state_is_tuple=True)
-            reverse_mixed_question_hypothesis_rep = _reverse(
-                mixed_question_hypothesis_rep, masks_hypothesis, 1, 0)
-
-            output_attender_fw, _ = tf.nn.dynamic_rnn(
-                cell, mixed_question_hypothesis_rep, dtype=tf.float32, scope="rnn")
-            output_attender_bw, _ = tf.nn.dynamic_rnn(
-                cell, reverse_mixed_question_hypothesis_rep, dtype=tf.float32, scope="rnn")
-
-            output_attender_bw = _reverse(
-                output_attender_bw, masks_hypothesis, 1, 0)
-
-        output_attender = tf.concat(
-            [output_attender_fw, output_attender_bw], axis=-1)  # (-1, P, 2*H)
-
-        return output_attender
 
     def run_match_lstm(self, encoded_rep, masks, return_sequence=False):
         encoded_question, encoded_hypothesis = encoded_rep
         masks_question, masks_hypothesis = masks
-
+        masks_hypothesis = tf.reduce_sum(masks_hypothesis, -1)
         #match_lstm_cell_attention_fn = lambda curr_input, state: tf.concat(
         #    [curr_input, state], axis=-1)
         
@@ -326,7 +298,7 @@ class matchLSTMcell(tf.nn.rnn_cell.RNNCell):
             # shape: b x q x 1
             a = tf.nn.softmax(tf.squeeze(tf.matmul(g, wa_e) + b_a, axis=[2]))
             # mask out the attention over the padding.
-            a = tf.multiply(a, self.question_m)
+            a = tf.multiply(self.question_m, a)
             question_attend = tf.reduce_sum(tf.multiply(self.h_question, tf.expand_dims(a, axis=[2])), axis=1)
 
             z = tf.concat([inputs, question_attend], axis=1)
