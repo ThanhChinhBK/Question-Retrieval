@@ -9,7 +9,7 @@ import os
 import DataUtils
 from nltk.tokenize import word_tokenize
 from tqdm import *
-from sklearn.metrics import precision_recall_fscore_support
+from sklearn.metrics import accuracy_score
 
 tf.flags.DEFINE_string("dataset", "QNLI", "SemEval/QNLI")
 tf.flags.DEFINE_string("mode", "pretrained", "pretrained/tranfer")
@@ -145,9 +145,9 @@ def SNLI_test_step(sess, model, test_data):
         final_pred += pred_label
         final_loss += [loss] * len(pred_label)
     print("loss in valid set :{}".format(np.mean(final_loss)))
-    prec, recall, f1 = precision_recall_fscore_support(y_true=y_test, y_pred=ypred)
-    print("precsion %.6f, recall: %.6f, f1: %.6f" %(prec, recall, f1)) 
-    return f1
+    acc = accuracy_score(y_true=y_test, y_pred=final_pred)
+    print("acc %.6f" %(acc)) 
+    return acc
 
 
 def SemEval_test_step(sess, model, test_data, call_back):
