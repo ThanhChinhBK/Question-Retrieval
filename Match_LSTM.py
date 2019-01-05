@@ -97,7 +97,7 @@ class MatchLSTM(object):
             print("Number of parameter is {}".format(len(vars)))
             lossL2 = tf.add_n([tf.nn.l2_loss(v) for v in vars
                                if 'bias' not in v.name and "embedd" not in v.name]) * 1e-4
-            self.loss = self.loss #+ lossL2
+            self.loss = self.loss + lossL2
             self.loss_SNLI = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(
                 labels=self.y_SNLI,
                 logits = logits_SNLI
