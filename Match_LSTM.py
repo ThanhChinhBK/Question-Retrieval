@@ -27,6 +27,8 @@ class MatchLSTM(object):
             learning_rate=self.config.learning_rate).minimize(self.loss)
         self.train_op_SNLI = tf.train.AdamOptimizer(
             learning_rate=self.config.learning_rate).minimize(self.loss_SNLI)
+        self.train_op_SQUAD = tf.train.AdamOptimizer(
+            learning_rate=self.config.learning_rate).minimize(self.loss_SQUAD)
 
     def _add_placeholder(self):
         with tf.variable_scope("placeholder"):
@@ -42,6 +44,8 @@ class MatchLSTM(object):
                 tf.float32, [None], "labels")
             self.y_SNLI = tf.placeholder(
                 tf.float32, [None, 3], "labels_SNLI")
+            self.y_SQUAD = tf.placeholder(
+                tf.int32, [None, 2], "labels_SNLI")
             self.dropout = tf.placeholder(
                 tf.float32, [], "dropout")
             self.queries_length = tf.cast(tf.cast(self.queries, tf.bool), tf.int32)
@@ -71,10 +75,9 @@ class MatchLSTM(object):
             [self.queries_length, self.hypothesis_length],
             encoder_state_input=None
         )
-        logits, logits_SNLI = self.decoder.decode([encoded_queries, encoded_hypothesis],
-                                     q_rep,
-                                     [self.queries_length, self.hypothesis_length])
-        print(logits_SNLI.get_shape())
+        logits, logits_SNLI, logits_SQUAD = self.decoder.decode([encoded_queries, encoded_hypothesis],
+                                                                q_rep,
+                                                                [self.queries_length, self.hypothesis_length])
         self.yp = tf.nn.sigmoid(logits)
         self.yp_SNLI = tf.argmax(logits_SNLI, -1)
         with tf.variable_scope("loss"):
@@ -95,10 +98,25 @@ class MatchLSTM(object):
             )
             vars = tf.trainable_variables()
             print("Number of parameter is {}".format(len(vars)))
-            lossL2 = tf.add_n([tf.nn.l2_loss(v) for v in vars
-                               if 'bias' not in v.name and "embedd" not in v.name]) * 1e-4
-            self.loss = self.loss + lossL2
+            vars_SemEval = [v for v in vars
+        if 'bias' not in v.name and "embedd" not in v.name and "SNLI" not in v.name and "SQUAD" not in v.name]
+            vars_SQUAD = [v for v in vars
+        if 'bias' not in v.name and "embedd" not in v.name and "SNLI" not in v.name and "SemEval" not in v.name]
+            print("Number of parameter in SemEval task is {}".format(len(vars_SemEval)))
+            print("Number of parameter in SQUAD task is {}".format(len(vars_SQUAD)))
+            lossL2_SemEval = tf.add_n([tf.nn.l2_loss(v) for v in vars_SemEval]) * 1e-4
+            lossL2_SQUAD = tf.add_n([tf.nn.l2_loss(v) for v in vars_SQUAD]) * 1e-4
+            self.loss = self.loss + lossL2_SemEval
             self.loss_SNLI = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(
                 labels=self.y_SNLI,
                 logits = logits_SNLI
             ))
+            loss_SQUAD_1 = tf.nn.sparse_softmax_cross_entropy_with_logits(
+                labels=self.y_SQUAD[:, 0],
+                logits = logits_SQUAD[0]
+            )
+            loss_SQUAD_2 = tf.nn.sparse_softmax_cross_entropy_with_logits(
+                labels=self.y_SQUAD[:, 1],
+                logits = logits_SQUAD[1]
+            )
+            self.loss_SQUAD = tf.reduce_mean(loss_SQUAD_1 + loss_SQUAD_2) + lossL2_SQUAD

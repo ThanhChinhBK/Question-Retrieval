@@ -11,6 +11,7 @@ from nltk.tokenize import word_tokenize
 from tqdm import *
 from sklearn.metrics import accuracy_score
 
+
 tf.flags.DEFINE_string("dataset", "QNLI", "SemEval/QNLI")
 tf.flags.DEFINE_string("mode", "pretrained", "pretrained/tranfer")
 # Training hyperparameter config
@@ -40,7 +41,6 @@ tf.flags.DEFINE_boolean("log_device_placement", False,
                         "Log placement of ops on devices")
 
 FLAGS = tf.flags.FLAGS
-
 
 def load_data_from_file(dsfile):
     q, q_l = [], [] # a set of questions
@@ -220,7 +220,7 @@ if __name__ == "__main__":
                 loss = train_step(sess, model, data_batch)
             else:
                 loss = SNLI_train_step(sess, model, data_batch)
-                t.set_description("epoch %d: train loss %.6f" % (e, loss))
+            t.set_description("epoch %d: train loss %.6f" % (e, loss))
             t.refresh()
         if FLAGS.dataset == "SemEval":
             curr_map = SemEval_test_step(sess, model, test_data, callback)
