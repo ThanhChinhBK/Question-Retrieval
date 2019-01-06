@@ -19,7 +19,7 @@ class MatchLSTM(object):
         self.word_embedding = word_embedding
         self._add_placeholder()
         self.encoder = Encoder(self.config.hidden_layer, self.dropout)
-        self.decoder = Decoder(self.config.hidden_layer,
+        self.decoder = Decoder(self.config.hidden_layer*2,
                                self.Ddim, self.dropout)
         self._add_embedding()
         self._build_model()

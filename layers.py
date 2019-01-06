@@ -8,6 +8,28 @@ from tensorflow.python.ops import array_ops
 from tensorflow.python.framework import dtypes
 from tensorflow.python.ops import linalg_ops
 from tensorflow.python.ops.init_ops import Initializer
+from tensorflow.python.ops import rnn_cell_impl
+from tensorflow.python.layers import core as layers_core
+import collections
+
+def get_hidden_state(cell_state):
+  """ Get the hidden state needed in cell state which is 
+      possibly returned by LSTMCell, GRUCell, RNNCell or MultiRNNCell.
+  
+  Args:
+    cell_state: a structure of cell state
+  Returns:
+    hidden_state: A Tensor
+  """
+
+  if type(cell_state) is tuple:
+    cell_state = cell_state[-1]
+  if hasattr(cell_state, "h"):
+    hidden_state = cell_state.h
+  else:
+    hidden_state = cell_state
+  return hidden_state
+
 
 class identity_initializer(Initializer):
   """Initializer that generates tensors initialized to identity matrix.
@@ -130,7 +152,7 @@ class Decoder(object):
         encoded_question, encoded_hypothesis = encoded_rep
         masks_question, masks_hypothesis = masks
         masks_hypothesis = tf.reduce_sum(masks_hypothesis, -1)
-        masks_question = tf.reduce_sum(masks_question, -1)
+        #masks_question = tf.reduce_sum(masks_question, -1)
         match_lstm_cell_attention_fn = lambda curr_input, state: tf.concat(
             [curr_input, state], axis=-1)
         
@@ -139,26 +161,40 @@ class Decoder(object):
         # output attention is false because we want to output the cell output
         # and not the attention values
         with tf.variable_scope("match_lstm_attender"):
-            attention_mechanism_match_lstm = BahdanauAttention(
-                query_depth, encoded_question, memory_sequence_length=masks_question)
-            cell = tf.contrib.rnn.BasicLSTMCell(
-                self.hidden_size*2, state_is_tuple=True)
-            lstm_attender = AttentionWrapper(
-                cell, attention_mechanism_match_lstm,
-                output_attention=False,
-                cell_input_fn=match_lstm_cell_attention_fn)
+            attention_mechanism_fw = SeqMatchSeqAttention(query_depth, encoded_question, masks_question)
+            mLSTM_fw_cell = SeqMatchSeqWrapper(tf.contrib.rnn.BasicLSTMCell(self.hidden_size, state_is_tuple=True),
+                                               attention_mechanism_fw)
+            attention_mechanism_bw = SeqMatchSeqAttention(query_depth, encoded_question, masks_question)
+            mLSTM_bw_cell = SeqMatchSeqWrapper(tf.contrib.rnn.BasicLSTMCell(self.hidden_size, state_is_tuple=True),
+                                               attention_mechanism_bw)
+            (output_attender_fw, output_attender_bw), (state_attender_fw, state_attender_bw) = tf.nn.bidirectional_dynamic_rnn(
+              mLSTM_fw_cell,
+              mLSTM_bw_cell,
+              encoded_hypothesis,
+              sequence_length=masks_hypothesis,
+              dtype=tf.float32
+             )
+            
+            # attention_mechanism_match_lstm = BahdanauAttention(
+            #     query_depth, encoded_question, memory_sequence_length=masks_question)
+            # cell = tf.contrib.rnn.BasicLSTMCell(
+            #     self.hidden_size*2, state_is_tuple=True)
+            # lstm_attender = AttentionWrapper(
+            #     cell, attention_mechanism_match_lstm,
+            #     output_attention=False,
+            #     cell_input_fn=match_lstm_cell_attention_fn)
 
-            # we don't mask the hypothesis because masking the memories will be
-            # handled by the pointerNet
-            reverse_encoded_hypothesis = _reverse(
-                encoded_hypothesis, masks_hypothesis, 1, 0)
+            # # we don't mask the hypothesis because masking the memories will be
+            # # handled by the pointerNet
+            # reverse_encoded_hypothesis = _reverse(
+            #     encoded_hypothesis, masks_hypothesis, 1, 0)
 
-            output_attender_fw, state_attender_fw = tf.nn.dynamic_rnn(
-                lstm_attender, encoded_hypothesis, dtype=tf.float32, scope="rnn")
-            output_attender_bw, state_attender_bw = tf.nn.dynamic_rnn(
-                lstm_attender, reverse_encoded_hypothesis, dtype=tf.float32, scope="rnn")
-            output_attender_bw = _reverse(
-                 output_attender_bw, masks_hypothesis, 1, 0)
+            # output_attender_fw, state_attender_fw = tf.nn.dynamic_rnn(
+            #     lstm_attender, encoded_hypothesis, dtype=tf.float32, scope="rnn")
+            # output_attender_bw, state_attender_bw = tf.nn.dynamic_rnn(
+            #     lstm_attender, reverse_encoded_hypothesis, dtype=tf.float32, scope="rnn")
+            # output_attender_bw = _reverse(
+            #      output_attender_bw, masks_hypothesis, 1, 0)
             # matchlstm_fw_cell = matchLSTMcell(query_depth, self.hidden_size, encoded_question,
             #                                   masks_question)
             # matchlstm_bw_cell = matchLSTMcell(query_depth, self.hidden_size, encoded_question,
@@ -239,114 +275,110 @@ class Decoder(object):
         return logits, logits_SNLI
 
 
-class matchLSTMcell(tf.nn.rnn_cell.RNNCell):
-    def __init__(self, input_size, state_size, h_question, question_m):
-        self.input_size = input_size
-        self._state_size = state_size
-        self.h_question = h_question
-        # self.question_m = tf.expand_dims(tf.cast(question_m, tf.int32), axis=[2])
-        self.question_m = tf.cast(question_m, tf.float32)
+class SeqMatchSeqAttentionState(
+    collections.namedtuple("SeqMatchSeqAttentionState", ("cell_state", "attention"))):
+  pass
 
-    @property
-    def state_size(self):
-        return self._state_size
+class SeqMatchSeqAttention(object):
+  """ Attention for SeqMatchSeq.
+  """
 
-    @property
-    def output_size(self):
-        return self._state_size
+  def __init__(self,num_units,premise_mem,premise_mem_weights,name="SeqMatchSeqAttention"):
+    """ Init SeqMatchSeqAttention
+    Args:
+      num_units: The depth of the attention mechanism.
+      premise_mem: encoded premise memory
+      premise_mem_weights: premise memory weights
+    """
+    # Init layers
+    self._name = name
+    self._num_units = num_units
+    # Shape: [batch_size,max_premise_len,rnn_size]
+    self._premise_mem = premise_mem
+    # Shape: [batch_size,max_premise_len]
+    self._premise_mem_weights = premise_mem_weights
 
-    def __call__(self, inputs, state, scope=None):
-        scope = scope or type(self).__name__
+    with tf.name_scope(self._name):
+      self.query_layer = layers_core.Dense(num_units, name="query_layer", use_bias=False)
+      self.hypothesis_mem_layer = layers_core.Dense(num_units, name="hypothesis_mem_layer", use_bias=False)
+      self.premise_mem_layer = layers_core.Dense(num_units, name="premise_mem_layer", use_bias=False)
+      # Preprocess premise Memory
+      # Shape: [batch_size, max_premise_len, num_units]
+      self._keys = self.premise_mem_layer(premise_mem)
+      self.batch_size = self._keys.shape[0].value 
+      self.alignments_size = self._keys.shape[1].value 
 
-        # It's always a good idea to scope variables in functions lest they
-        # be defined elsewhere!
-        dtype=tf.float32
-        regularizer=None
-        with tf.variable_scope(scope):
-            # i.e. the batch size
-            num_example = tf.shape(self.h_question)[0]
-            
-            # TODO: figure out the right way to initialize rnn weights.
-            # initializer = tf.contrib.layers.xavier_initializer()
-            initializer = tf.uniform_unit_scaling_initializer(1.0)
+  def __call__(self, hypothesis_mem, query):
+    """ Perform attention
+    Args:
+      hypothesis_mem: hypothesis memory
+      query: hidden state from last time step
+    Returns:
+      attention: computed attention
+    """
+    with tf.name_scope(self._name):
+      # Shape: [batch_size, 1, num_units]
+      processed_hypothesis_mem = tf.expand_dims(self.hypothesis_mem_layer(hypothesis_mem), 1)
+      # Shape: [batch_size, 1, num_units]
+      processed_query = tf.expand_dims(self.query_layer(query), 1)
+      v = tf.get_variable("attention_v", [self._num_units], dtype=tf.float32)
+      # Shape: [batch_size, max_premise_len]
+      score = tf.reduce_sum(v * tf.tanh(self._keys + processed_hypothesis_mem + processed_query), [2])
+      # Mask score with -inf
+      score_mask_values = float("-inf") * (1.-tf.cast(self._premise_mem_weights, tf.float32))
+      masked_score = tf.where(tf.cast(self._premise_mem_weights, tf.bool), score, score_mask_values)
+      # Calculate alignments
+      # Shape: [batch_size, max_premise_len]
+      alignments = tf.nn.softmax(masked_score)
+      # Calculate attention
+      # Shape: [batch_size, rnn_size]
+      attention = tf.reduce_sum(tf.expand_dims(alignments, 2) * self._premise_mem, axis=1)
+      return attention
 
-            W_q = tf.get_variable('W_q', [self.input_size, self.input_size], dtype,
-                                  initializer, regularizer=regularizer
-                                  )
-            W_c = tf.get_variable('W_c', [self.input_size, self.input_size], dtype,
-                                  initializer, regularizer=regularizer
-                                  )
-            W_r = tf.get_variable('W_r', [self._state_size, self.input_size], dtype,
-                                  # initializer
-                                  identity_initializer(), regularizer=regularizer
-                                  )
-            W_a = tf.get_variable('W_a', [self.input_size, 1], dtype,
-                                  initializer, regularizer=regularizer
-                                  )
-            b_g = tf.get_variable('b_g', [self.input_size], dtype,
-                                  tf.zeros_initializer(), regularizer=None)
-            b_a = tf.get_variable('b_a', [1], dtype,
-                                  tf.zeros_initializer(), regularizer=None)
 
-            wq_e = tf.tile(tf.expand_dims(W_q, axis=[0]), [num_example, 1, 1])
-            g = tf.tanh(tf.matmul(self.h_question, wq_e)  # b x q x 2n
-                        + tf.expand_dims(tf.matmul(inputs, W_c)
-                                         + tf.matmul(state, W_r) + b_g, axis=[1]))
-            # TODO:add drop out
-            # g = tf.nn.dropout(g, keep_prob=keep_prob)
+class SeqMatchSeqWrapper(rnn_cell_impl.RNNCell):
+  """ RNN Wrapper for SeqMatchSeq.
+  """
+  def __init__(self, cell, attention_mechanism, name='SeqMatchSeqWrapper'):
+    super(SeqMatchSeqWrapper, self).__init__(name=name)
+    self._cell = cell
+    self._attention_mechanism = attention_mechanism
 
-            wa_e = tf.tile(tf.expand_dims(W_a, axis=0), [num_example, 1, 1])
-            # shape: b x q x 1
-            a = tf.nn.softmax(tf.squeeze(tf.matmul(g, wa_e) + b_a, axis=[2]))
-            # mask out the attention over the padding.
-            a = tf.multiply(self.question_m, a)
-            question_attend = tf.reduce_sum(tf.multiply(self.h_question, tf.expand_dims(a, axis=[2])), axis=1)
+  def call(self, inputs, state):
+    """
+    Args:
+      inputs: inputs at some time step
+      state: A (structure of) cell state
+    """
+    # Concatenate attention and input 
+    cell_inputs = tf.concat([state.attention, inputs], axis=-1)
+    cell_state = state.cell_state
+    # Call cell function
+    cell_output, next_cell_state = self._cell(cell_inputs, cell_state)
+    # Get hidden state
+    hidden_state = get_hidden_state(cell_state)
+    # Calculate attention
+    attention = self._attention_mechanism(inputs, hidden_state)
+    # Assemble next state
+    next_state = SeqMatchSeqAttentionState(
+      cell_state=next_cell_state,
+      attention=attention)
+    return cell_output, next_state
 
-            z = tf.concat([inputs, question_attend], axis=1)
+  @property
+  def state_size(self):
+    return SeqMatchSeqAttentionState(
+        cell_state=self._cell.state_size,
+        attention=self._attention_mechanism._premise_mem.get_shape()[-1].value
+        )
 
-            # NOTE: replace the lstm with GRU.
-            # we choose to initialize weight matrix related to hidden to hidden collection with
-            # identity initializer.
-            W_f = tf.get_variable('W_f', (self._state_size, self._state_size), dtype,
-                                  # initializer
-                                  identity_initializer(), regularizer=regularizer
-                                  )
-            U_f = tf.get_variable('U_f', (2 * self.input_size, self._state_size), dtype,
-                                  initializer, regularizer=regularizer
-                                  )
-            # initialize b_f with constant 1.0
-            b_f = tf.get_variable('b_f', (self._state_size,), dtype,
-                                  tf.constant_initializer(1.0),
-                                  regularizer=None)
-            W_z = tf.get_variable('W_z', (self.state_size, self._state_size), dtype,
-                                  # initializer
-                                  identity_initializer(), regularizer=regularizer
-                                  )
-            U_z = tf.get_variable('U_z', (2 * self.input_size, self._state_size), dtype,
-                                  initializer, regularizer=regularizer
-                                  )
-            # initialize b_z with constant 1.0
-            b_z = tf.get_variable('b_z', (self.state_size,), dtype,
-                                  tf.constant_initializer(1.0),
-                                  regularizer=None)  # tf.zeros_initializer())
-            W_o = tf.get_variable('W_o', (self.state_size, self._state_size), dtype,
-                                  # initializer
-                                  identity_initializer, regularizer=regularizer
-                                  )
-            U_o = tf.get_variable('U_o', (2 * self.input_size, self._state_size), dtype,
-                                  initializer, regularizer=regularizer
-                                  )
-            b_o = tf.get_variable('b_o', (self._state_size,), dtype,
-                                  tf.constant_initializer(0.0), regularizer=None)
+  @property
+  def output_size(self):
+    return self._cell.output_size
 
-            z_t = tf.nn.sigmoid(tf.matmul(z, U_z)
-                                + tf.matmul(state, W_z) + b_z)
-            f_t = tf.nn.sigmoid(tf.matmul(z, U_f)
-                                + tf.matmul(state, W_f) + b_f)
-            o_t = tf.nn.tanh(tf.matmul(z, U_o)
-                             + tf.matmul(f_t * state, W_o) + b_o)
-
-            output = z_t * state + (1 - z_t) * o_t
-            new_state = output
-
-        return output, new_state
+  def zero_state(self, batch_size, dtype):
+    cell_state = self._cell.zero_state(batch_size, dtype)
+    attention = rnn_cell_impl._zero_state_tensors(self.state_size.attention, batch_size, tf.float32)
+    return SeqMatchSeqAttentionState(
+          cell_state=cell_state,
+      attention=attention)
