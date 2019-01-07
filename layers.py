@@ -208,7 +208,7 @@ class Decoder(object):
             #masks_passage = tf.reduce_sum(masks_passage, -1)
             fake_inputs = tf.zeros((batch_size, 2, 1))
             fake_sequence_length = tf.ones(
-                (batch_size,)) * 2  # 2 for start and end
+                (batch_size,), dtype=tf.int32) * 2  # 2 for start and end
 
             answer_ptr_cell_input_fn = lambda curr_input, context: context
             query_depth_answer_ptr = output_attender.get_shape()[-1]
@@ -217,22 +217,22 @@ class Decoder(object):
                 with tf.variable_scope("fw"):
                     answer_ptr_cell_fw = PointerNetLSTMCell(
                         self.hidden_size, output_attender, masks_passage)
-                    outputs_fw, _ = tf.nn.dynamic_rnn(answer_ptr_cell_fw,
+                    outputs_fw, _ = custom_dynamic_rnn(answer_ptr_cell_fw,
                                                       fake_inputs,
                                                       fake_sequence_length,
-                                                      dtype=tf.float32)
+                    )
                 with tf.variable_scope("bw"):
                     answer_ptr_cell_bw = PointerNetLSTMCell(
                         self.hidden_size, output_attender, masks_passage)
-                    outputs_bw, _ = tf.nn.dynamic_rnn(answer_ptr_cell_bw,
+                    outputs_bw, _ = custom_dynamic_rnn(answer_ptr_cell_bw,
                                                       fake_inputs,
                                                       fake_sequence_length,
-                                                      dtype=tf.float32)
+                    )
             start_prob = (outputs_fw[0:, 0, 0:] + outputs_bw[0:, 1, 0:]) / 2
             end_prob = (outputs_fw[0:, 1, 0:] + outputs_bw[0:, 0, 0:]) / 2
 
         return start_prob, end_prob
-        
+
     def run_projection(self, state_attender, output_dim, scope="projection"):
         with tf.variable_scope(scope):
             input_projection = state_attender
@@ -407,8 +407,8 @@ class PointerNetLSTMCell(tf.contrib.rnn.LSTMCell):
             num_units, state_is_tuple=True)
         #seq_pad = tf.shape(context_to_point)[1]
         self.sequence_mask = tf.cast(
-           mask, tf.float32)
-        
+            mask, tf.float32)
+
         self.context_to_point = context_to_point
         self.fc_context = tf.contrib.layers.fully_connected(self.context_to_point,
                                                             num_outputs=self._num_units,
@@ -431,3 +431,64 @@ class PointerNetLSTMCell(tf.contrib.rnn.LSTMCell):
             lstm_out, lstm_state = super(
                 PointerNetLSTMCell, self).__call__(attended_context, state)
         return tf.squeeze(scores, -1), lstm_state
+
+def custom_dynamic_rnn(cell, inputs, inputs_len, initial_state=None):
+    """
+    Implements a dynamic rnn that can store scores in the pointer network,
+    the reason why we implements this is that the raw_rnn or dynamic_rnn function in Tensorflow
+    seem to require the hidden unit and memory unit has the same dimension, and we cannot
+    store the scores directly in the hidden unit.
+    Args:
+        cell: RNN cell
+        inputs: the input sequence to rnn
+        inputs_len: valid length
+        initial_state: initial_state of the cell
+    Returns:
+        outputs and state
+    """
+    print(inputs_len)
+    batch_size = tf.shape(inputs)[0]
+    max_time = tf.shape(inputs)[1]
+
+    inputs_ta = tf.TensorArray(dtype=tf.float32, size=max_time)
+    inputs_ta = inputs_ta.unstack(tf.transpose(inputs, [1, 0, 2]))
+    emit_ta = tf.TensorArray(dtype=tf.float32, dynamic_size=True, size=0)
+    t0 = tf.constant(0, dtype=tf.int32)
+    if initial_state is not None:
+        s0 = initial_state
+    else:
+        s0 = cell.zero_state(batch_size, dtype=tf.float32)
+    f0 = tf.zeros([batch_size], dtype=tf.bool)
+
+    def loop_fn(t, prev_s, emit_ta, finished):
+        """
+        the loop function of rnn
+        """
+        cur_x = inputs_ta.read(t)
+        scores, cur_state = cell(cur_x, prev_s)
+
+        # copy through
+        scores = tf.where(finished, tf.zeros_like(scores), scores)
+
+        if isinstance(cell, tf.contrib.rnn.LSTMCell):
+            cur_c, cur_h = cur_state
+            prev_c, prev_h = prev_s
+            cur_state = tf.contrib.rnn.LSTMStateTuple(tf.where(finished, prev_c, cur_c),
+                                              tf.where(finished, prev_h, cur_h))
+        else:
+            cur_state = tf.where(finished, prev_s, cur_state)
+
+        emit_ta = emit_ta.write(t, scores)
+        finished = tf.greater_equal(t + 1, inputs_len)
+        return [t + 1, cur_state, emit_ta, finished]
+
+    _, state, emit_ta, _ = tf.while_loop(
+        cond=lambda _1, _2, _3, finished: tf.logical_not(
+            tf.reduce_all(finished)),
+        body=loop_fn,
+        loop_vars=(t0, s0, emit_ta, f0),
+        parallel_iterations=32,
+        swap_memory=False)
+
+    outputs = tf.transpose(emit_ta.stack(), [1, 0, 2])
+    return outputs, state
