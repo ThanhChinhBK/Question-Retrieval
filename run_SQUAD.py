@@ -18,11 +18,11 @@ tf.flags.DEFINE_string("mode", "pretrained", "pretrained/tranfer")
 # Training hyperparameter config
 tf.flags.DEFINE_integer("batch_size", 64, "batch size")
 tf.flags.DEFINE_integer("epochs", 160, "epochs")
-tf.flags.DEFINE_float("learning_rate", 1e-4, "learning rate")
+tf.flags.DEFINE_float("learning_rate", 1e-3, "learning rate")
 tf.flags.DEFINE_float("grad_clip", 5.0, "")
 # LSTM config
 tf.flags.DEFINE_integer("hidden_layer", 300, "")
-tf.flags.DEFINE_integer("pad", 600, "")
+tf.flags.DEFINE_integer("pad", 610, "")
 tf.flags.DEFINE_float("dropout", 0.3, "")
 tf.flags.DEFINE_string("Ddim", "2", "")
 tf.flags.DEFINE_boolean("bidi", True, "")
@@ -31,7 +31,7 @@ tf.flags.DEFINE_string("bidi_mode", "concatenate", "")
 tf.flags.DEFINE_boolean("use_cudnn", True, "")
 # word vector config
 tf.flags.DEFINE_string(
-    "embedding_path", "glove.6B.50d.txt", "word embedding path")
+    "embedding_path", "glove.6B.300d.txt", "word embedding path")
 # Tensorflow config
 tf.flags.DEFINE_integer("num_checkpoints", 5,
                         "Number of checkpoints to store (default: 5)")
@@ -104,12 +104,12 @@ def load_set(fname, vocab=None, iseval=False):
         qi = e["ques_tokens"]  
         si = e["context_tokens"]
         qis.append(qi)
-        sis.append(sis)
+        sis.append(si)
         q.append(e["ques_tokens"])
         sents.append(e["context_tokens"])
         y.append(e["y"])
-    qis = vocab.vectorize(qis, pad)
-    sis = vocab.vectorize(qis, pad)
+    qis = vocab.vectorize(qis, 50)
+    sis = vocab.vectorize(sis, pad)
     inp = make_model_inputs(qis, sis, q, sents, y)
     if iseval:
         return (inp, y)
@@ -149,6 +149,10 @@ def load_data_SQUAD(filename):
                     y = [y1,y2]
                     example = {"context_tokens": context_tokens, "ques_tokens": ques_tokens,
                                "y":y,}
+                    if y2 >= 610:
+                        print(context)
+                        print(y2)
+                        print(len(context))
                     examples.append(example)
                     
         random.shuffle(examples)
@@ -189,7 +193,7 @@ def train_step(sess, model, data_batch):
     return loss
 
 def test_step(sess, model, test_data):
-    q_test, s_test, ql_test, sl_test, y_test = test_data
+    q_test, s_test, y_test = test_data
     final_pred = []
     final_loss = []
     for i in range(0, len(y_test), FLAGS.batch_size):
@@ -198,19 +202,20 @@ def test_step(sess, model, test_data):
             #model.queries_length : ql_test[i:i+FLAGS.batch_size],
             model.hypothesis : s_test[i:i+FLAGS.batch_size],
             #model.hypothesis_length : sl_test[i:i+FLAGS.batch_size],
-            model.y : y_test[i:i+FLAGS.batch_size],
+            model.y_SQUAD : y_test[i:i+FLAGS.batch_size],
             model.dropout : 1.0
         }
         loss = sess.run([model.loss_SQUAD], feed_dict=feed_dict)
+        final_loss.append(loss)
     print("loss in valid set :{}".format(np.mean(final_loss)))
     
-    return loss
+    return np.mean(final_loss)
 
     
 if __name__ == "__main__":
-    trainf = os.path.join('SQUAD/dev-v1.1.json')
+    trainf = os.path.join('SQUAD/train-v1.1.json')
     valf = os.path.join('SQUAD/dev-v1.1.json')
-    best_map = 0
+    best_map = 100
     best_epoch = 0
     print("Load data")
     read_data(trainf, valf)
@@ -244,10 +249,10 @@ if __name__ == "__main__":
             loss = train_step(sess, model, data_batch)
             t.set_description("epoch %d: train loss %.6f" % (e, loss))
             t.refresh()
-    
         curr_map = test_step(sess, model, test_data)
-    
+        print("best loss in dev: %.6f" %best_map)
         if curr_map < best_map:
             best_map = curr_map
             best_epoch = e
             save_path = saver.save(sess, os.path.join(checkpoint_dir, "checkpoint"), e)
+            print("saved in %s" %save_path)

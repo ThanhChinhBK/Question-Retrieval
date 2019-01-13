@@ -12,7 +12,7 @@ from tqdm import *
 from sklearn.metrics import accuracy_score
 
 
-tf.flags.DEFINE_string("dataset", "QNLI", "SemEval/QNLI")
+tf.flags.DEFINE_string("dataset", "SemEval", "SemEval/QNLI")
 tf.flags.DEFINE_string("mode", "pretrained", "pretrained/tranfer")
 # Training hyperparameter config
 tf.flags.DEFINE_integer("batch_size", 64, "batch size")
@@ -21,7 +21,7 @@ tf.flags.DEFINE_float("learning_rate", 1e-4, "learning rate")
 tf.flags.DEFINE_float("grad_clip", 5.0, "")
 # LSTM config
 tf.flags.DEFINE_integer("hidden_layer", 300, "")
-tf.flags.DEFINE_integer("pad", 100, "")
+tf.flags.DEFINE_integer("pad", 150, "")
 tf.flags.DEFINE_float("dropout", 0.3, "")
 tf.flags.DEFINE_string("Ddim", "2", "")
 tf.flags.DEFINE_boolean("bidi", True, "")
@@ -30,7 +30,7 @@ tf.flags.DEFINE_string("bidi_mode", "concatenate", "")
 tf.flags.DEFINE_boolean("use_cudnn", True, "")
 # word vector config
 tf.flags.DEFINE_string(
-    "embedding_path", "glove.6B.50d.txt", "word embedding path")
+    "embedding_path", "glove.6B.300d.txt", "word embedding path")
 # Tensorflow config
 tf.flags.DEFINE_integer("num_checkpoints", 5,
                         "Number of checkpoints to store (default: 5)")
@@ -174,7 +174,7 @@ def SemEval_test_step(sess, model, test_data, call_back):
 
 
 if __name__ == "__main__":
-    trainf = os.path.join(FLAGS.dataset, 'test.txt')
+    trainf = os.path.join(FLAGS.dataset, 'train.txt')
     valf = os.path.join(FLAGS.dataset, 'test.txt')
     testf = os.path.join(FLAGS.dataset, 'dev.txt')
     best_map = 0

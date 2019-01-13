@@ -33,7 +33,7 @@ class MatchLSTM(object):
     def _add_placeholder(self):
         with tf.variable_scope("placeholder"):
             self.queries = tf.placeholder(
-                tf.int32, [None, self.config.pad], "queries")
+                tf.int32, [None, 50], "queries")
             #self.queries_length = tf.placeholder(
             #    tf.int32, [None], "queries_length")
             self.hypothesis = tf.placeholder(
@@ -119,4 +119,4 @@ class MatchLSTM(object):
                 labels=self.y_SQUAD[:, 1],
                 logits = logits_SQUAD[1]
             )
-            self.loss_SQUAD = tf.reduce_mean(loss_SQUAD_1 + loss_SQUAD_2) + lossL2_SQUAD
+            self.loss_SQUAD = tf.reduce_mean(loss_SQUAD_1 + loss_SQUAD_2)
