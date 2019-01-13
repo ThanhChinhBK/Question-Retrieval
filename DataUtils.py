@@ -314,6 +314,60 @@ class Vocabulary:
     def size(self):
         return len(self.word_idx)
 
+class CharVocabulary:
+    """ word-to-index mapping, token sequence mapping tools and
+    embedding matrix construction tools """
+
+    def __init__(self, sentences, count_thres=1):
+        """ build a vocabulary from given list of sentences, but including
+        only words occuring at least #count_thres times """
+
+        # Counter() is superslow :(
+        vocabset = defaultdict(int)
+        for s in sentences:
+            for t in s:
+                for z in t:
+                    vocabset[z] += 1
+
+        vocab = sorted(list(map(itemgetter(0),
+                                filter(lambda k: itemgetter(1)(k) >= count_thres,
+                                       vocabset.items()))))
+        self.char_idx = dict((w, i + 2) for i, w in enumerate(vocab))
+        self.char_idx['_PAD_'] = 0
+        self.char_idx['_OOV_'] = 1
+        print('Char Vocabulary of %d words' % (len(self.char_idx)))
+
+        self.embcache = dict()
+
+    def update(self, sentences):
+        for s in sentences:
+            for t in s:
+                for z in t:
+                    self.add_word(z)
+        print('Char Vocabulary of %d words' % (len(self.char_idx)))
+
+    def add_word(self, word):
+        if word not in self.char_idx:
+            self.char_idx[word] = len(self.char_idx)
+
+    def vectorize(self, slist, pad=15, seq_pad=60):
+        """ build an pad-ed matrix of word indices from a list of
+        token sequences """
+        silist = []
+        for s in slist:
+            cilist = [[self.char_idx.get(t, 1) for t in c] for c in s]
+            cilist = pad_sequences(cilist, maxlen=pad, truncating='post', padding='post')
+            if seq_pad <= len(cilist):
+                silist.append(cilist[:seq_pad])
+            else:
+                cilist = np.concatenate((cilist, np.zeros([seq_pad-len(cilist), pad], dtype=np.int32)), 0)
+                silist.append(cilist)
+        return silist
+
+    def size(self):
+        return len(self.char_idx)
+
+
 """
 Evaluation tools, mainly non-straightforward methods.
 """

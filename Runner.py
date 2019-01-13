@@ -31,6 +31,9 @@ tf.flags.DEFINE_boolean("use_cudnn", True, "")
 # word vector config
 tf.flags.DEFINE_string(
     "embedding_path", "glove.6B.300d.txt", "word embedding path")
+tf.flags.DEFINE_boolean("use_char_embedding", True, "")
+tf.flags.DEFINE_integer("char_embedding_dim", 50, "")
+tf.flags.DEFINE_integer("char_pad", 15, "")
 # Tensorflow config
 tf.flags.DEFINE_integer("num_checkpoints", 5,
                         "Number of checkpoints to store (default: 5)")
@@ -39,6 +42,7 @@ tf.flags.DEFINE_boolean("allow_soft_placement", True,
                         "Allow device soft device placement")
 tf.flags.DEFINE_boolean("log_device_placement", False,
                         "Log placement of ops on devices")
+
 
 FLAGS = tf.flags.FLAGS
 
@@ -61,40 +65,48 @@ def load_data_from_file(dsfile):
     return (q, sents,q_l, s_l,  labels)
 
 
-def make_model_inputs(qi, si, q_l, s_l, q, sents, y):
-    inp = {'qi': qi, 'si': si, 'q_l':q_l, 's_l':s_l, 'q':q, 'sents':sents, 'y':y} 
+def make_model_inputs(qi, si, qi_char, si_char, q_l, s_l, q, sents, y):
+    inp = {'qi': qi, 'si': si, 'qi_char':qi_char, 'si_char': si_char,
+           'q_l':q_l, 's_l':s_l, 'q':q, 'sents':sents, 'y':y} 
     
     return inp
  
-def load_set(fname, vocab=None, iseval=False):
+def load_set(fname, vocab=None, char_vocab=None, iseval=False):
     q, sents, q_l, s_l, y = load_data_from_file(fname)
     if not iseval:
         if vocab == None:
             vocab = DataUtils.Vocabulary(q + sents)
         else:
             vocab.update(q+sents)
+        if char_vocab == None:
+            char_vocab = DataUtils.CharVocabulary(q+sents)
+        else:
+            char_vocab.update(q+sents)
     
     pad = FLAGS.pad
+    char_pad = FLAGS.char_pad
     
     qi = vocab.vectorize(q, pad=pad)  
-    si = vocab.vectorize(sents, pad=pad)        
+    si = vocab.vectorize(sents, pad=pad)
+    qi_char = char_vocab.vectorize(q, pad=char_pad, seq_pad=pad)
+    si_char = char_vocab.vectorize(sents, pad=char_pad, seq_pad=pad)
     
-    inp = make_model_inputs(qi, si, q_l, s_l, q, sents, y)
+    inp = make_model_inputs(qi, si, qi_char, si_char, q_l, s_l, q, sents, y)
     if iseval:
         return (inp, y)
     else:
-        return (inp, y, vocab)        
+        return (inp, y, vocab, char_vocab)        
     
 
 def load_data(trainf, valf, testf):
-    global vocab, inp_tr, inp_val, inp_test, y_train, y_val, y_test
+    global vocab, char_vocab, inp_tr, inp_val, inp_test, y_train, y_val, y_test
     if FLAGS.mode == "pretrained":
-        _,_, vocab = load_set("SemEval/train.txt", iseval=False)
-        inp_tr, y_train, vocab = load_set(trainf, vocab, iseval=False)
+        _,_, vocab, char_vocab = load_set("SemEval/train.txt", iseval=False)
+        inp_tr, y_train, vocab, char_vocab = load_set(trainf, vocab, char_vocab, iseval=False)
     else:
         vocab = pickle.load(open("vocab.pkl", "rb"))
-        inp_tr, y_train = load_set(trainf, vocab, iseval=True)
-    inp_val, y_val = load_set(valf, vocab=vocab, iseval=True)
+        inp_tr, y_train = load_set(trainf, vocab, char_vocab, iseval=True)
+    inp_val, y_val = load_set(valf, vocab, char_vocab, iseval=True)
     #inp_test, y_test = load_set(testf, vocab=vocab, iseval=True)
 
 
@@ -113,11 +125,13 @@ def SNLI_train_step(sess, model, data_batch):
     return loss
 
 def train_step(sess, model, data_batch):
-    q_batch, s_batch, ql_batch, sl_batch, y_batch = data_batch
+    q_batch, s_batch, q_char_batch, s_char_batch, ql_batch, sl_batch, y_batch = data_batch
     feed_dict = {
         model.queries : q_batch,
+        model.queries_char : q_char_batch,
         #model.queries_length : ql_batch,
         model.hypothesis : s_batch,
+        model.hypothesis_char : s_char_batch,
         #model.hypothesis_length : sl_batch,
         model.dropout : FLAGS.dropout,
         model.y : y_batch
@@ -151,14 +165,16 @@ def SNLI_test_step(sess, model, test_data):
 
 
 def SemEval_test_step(sess, model, test_data, call_back):
-    q_test, s_test, ql_test, sl_test, y_test = test_data
+    q_test, s_test, q_char_batch, s_char_batch, ql_test, sl_test, y_test = test_data
     final_pred = []
     final_loss = []
     for i in range(0, len(y_test), FLAGS.batch_size):
         feed_dict = {
             model.queries : q_test[i:i+FLAGS.batch_size],
+            model.queries_char: q_char_batch[i:i+FLAGS.batch_size],
             #model.queries_length : ql_test[i:i+FLAGS.batch_size],
             model.hypothesis : s_test[i:i+FLAGS.batch_size],
+            model.hypothesis_char : s_char_batch[i:i+FLAGS.batch_size],
             #model.hypothesis_length : sl_test[i:i+FLAGS.batch_size],
             model.y : y_test[i:i+FLAGS.batch_size],
             model.dropout : 1.0
@@ -188,7 +204,7 @@ if __name__ == "__main__":
         allow_soft_placement=FLAGS.allow_soft_placement,
         log_device_placement=FLAGS.log_device_placement)
     sess = tf.Session(config=session_conf) 
-    model = MatchLSTM(FLAGS, vocab, emb)
+    model = MatchLSTM(FLAGS, vocab, char_vocab, emb)
     
     checkpoint_dir = os.path.abspath(os.path.join(FLAGS.out_dir, "checkpoints"))
     if not os.path.exists(checkpoint_dir):
@@ -197,6 +213,8 @@ if __name__ == "__main__":
     callback = DataUtils.AnsSelCB(inp_val['q'], inp_val['sents'], y_val, inp_val)
     test_data = [ inp_val['qi'],
                   inp_val['si'],
+                  inp_val['qi_char'],
+                  inp_val['si_char'],
                   inp_val['q_l'],
                   inp_val['s_l'],
                   y_val
@@ -212,6 +230,8 @@ if __name__ == "__main__":
         for i in t:
             data_batch = [ inp_tr['qi'][i:i+FLAGS.batch_size],
                            inp_tr['si'][i:i+FLAGS.batch_size],
+                           inp_tr['qi_char'][i:i+FLAGS.batch_size],
+                           inp_tr['si_char'][i:i+FLAGS.batch_size],
                            inp_tr['q_l'][i:i+FLAGS.batch_size],
                            inp_tr['s_l'][i:i+FLAGS.batch_size],
                            y_train[i:i+FLAGS.batch_size]
