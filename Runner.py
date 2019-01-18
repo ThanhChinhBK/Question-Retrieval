@@ -35,7 +35,7 @@ tf.flags.DEFINE_boolean("use_char_embedding", True, "")
 tf.flags.DEFINE_integer("char_embedding_dim", 50, "")
 tf.flags.DEFINE_integer("char_pad", 15, "")
 # Tensorflow config
-tf.flags.DEFINE_integer("num_checkpoints", 5,
+tf.flags.DEFINE_integer("num_checkpoints", 2,
                         "Number of checkpoints to store (default: 5)")
 tf.flags.DEFINE_string("out_dir", "runs/", "path to save checkpoint")
 tf.flags.DEFINE_boolean("allow_soft_placement", True,
@@ -101,7 +101,7 @@ def load_set(fname, vocab=None, char_vocab=None, iseval=False):
 def load_data(trainf, valf, testf):
     global vocab, char_vocab, inp_tr, inp_val, inp_test, y_train, y_val, y_test
     if FLAGS.mode == "pretrained":
-        _,_, vocab, char_vocab = load_set("SemEval/train.txt", iseval=False)
+        _,_, vocab, char_vocab = load_set("SemEval/test.txt", iseval=False)
         inp_tr, y_train, vocab, char_vocab = load_set(trainf, vocab, char_vocab, iseval=False)
     else:
         vocab = pickle.load(open("vocab.pkl", "rb"))

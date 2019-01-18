@@ -19,10 +19,11 @@ class MatchLSTM(object):
         self.char_vocab = char_vocab
         self.word_embedding = word_embedding
         self._add_placeholder()
+        
+        self._add_embedding()
         self.encoder = Encoder(self.config.hidden_layer, self.dropout)
         self.decoder = Decoder(self.config.hidden_layer * 2,
                                self.Ddim, self.dropout)
-        self._add_embedding()
         self._build_model()
         self.train_op = tf.train.AdamOptimizer(
             learning_rate=self.config.learning_rate).minimize(self.loss)
