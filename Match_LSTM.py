@@ -1,6 +1,7 @@
 import tensorflow as tf
 from layers import *
 import numpy as np
+from match_layer import *
 
 
 rnnact_dict = {
