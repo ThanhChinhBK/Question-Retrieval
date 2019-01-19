@@ -45,8 +45,7 @@ class MatchLSTMAttnCell(tc.rnn.LSTMCell):
             logits = tf.multiply(logits, self.mask_context)
             scores = tf.nn.softmax(logits, 1)
             attended_context = tf.reduce_sum(self.context_to_attend * scores, axis=1)
-            new_inputs = tf.concat([inputs, attended_context,
-                                    inputs - attended_context, inputs * attended_context],
+            new_inputs = tf.concat([inputs, attended_context],
                                    -1)
             return super(MatchLSTMAttnCell, self).__call__(new_inputs, state, scope)
 
