@@ -164,7 +164,7 @@ def SNLI_test_step(sess, model, test_data):
     return acc
 
 
-def SemEval_test_step(sess, model, test_data, call_back):
+def SemEval_test_step(sess, model, test_data, call_back, debug=False):
     q_test, s_test, q_char_batch, s_char_batch, ql_test, sl_test, y_test = test_data
     final_pred = []
     final_loss = []
@@ -184,6 +184,9 @@ def SemEval_test_step(sess, model, test_data, call_back):
         final_pred += pred_label
         final_loss += [loss] * len(pred_label)
     print("loss in valid set :{}".format(np.mean(final_loss)))
+    if debug:
+        callback.on_debug(final_pred)
+        
     logs = call_back.on_epoch_end(final_pred)
     #print("In dev set: loss: {} MMR: {} MAP: {}".format(loss, logs['mrr'], logs['map']))
     return logs['map']
@@ -221,6 +224,11 @@ if __name__ == "__main__":
     ]
     if FLAGS.mode == "pretrained":
         sess.run(tf.global_variables_initializer())
+    elif FLAGS.mode == "debug":
+        last_checkpoint = tf.train.latest_checkpoint(checkpoint_dir)
+        saver.restore(sess,last_checkpoint)
+        print("loaded model from checkpoint {}".format(last_checkpoint))
+        SemEval_test_step(sess, model, test_data, callback)
     else:
         last_checkpoint = tf.train.latest_checkpoint(checkpoint_dir)
         saver.restore(sess,last_checkpoint)

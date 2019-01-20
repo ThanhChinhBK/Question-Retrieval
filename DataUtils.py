@@ -425,7 +425,7 @@ def mrr(s0, y, ypred):
     return np.mean(rr)
 
 
-def map_(s0, y, ypred):
+def map_(s0, y, ypred, debug=False):
     MAP = []
     for s, ys in aggregate_s0(s0, y, ypred):
         candidates = ys
@@ -439,7 +439,10 @@ def map_(s0, y, ypred):
         if len(precisions):
             avg_prec = sum(precisions) / len(precisions)
         MAP.append(avg_prec)
-    return np.mean(MAP)
+    if debug:
+        return MAP
+    else:
+        return np.mean(MAP)
 
 AnsSelRes = namedtuple('AnsSelRes', ['MRR', 'MAP'])
 
@@ -474,3 +477,15 @@ class AnsSelCB():
         logs['mrr'] = mrr_
         logs['map'] = map__
         return logs
+
+    def on_debug(self, pred, thresold=0.6, fn="debug.txt"):
+        fw = open(fn , "w")
+        q_uniq = set(self.val_q)
+        MAP =  map_(self.val_q, self.val_y, pred, debug=True)
+        for i, _map in enumerate(MAP):
+            if _map < thresold:
+                fw.write("%.6f\t%s\n" %(_map, q_uniq[i]))
+                for j in range(10):
+                    ind = i * 10 + j
+                    fw.write("%s\t%d\t%.6f\n" %(self.val_s[ind], self.val_y[ind], pred[ind]))
+        fw.close()
