@@ -31,7 +31,7 @@ class MatchLSTMAttnCell(tc.rnn.LSTMCell):
         self.fc_context = tc.layers.fully_connected(self.context_to_attend,
                                                     num_outputs=self._num_units,
                                                     activation_fn=None)
-        self.mask_context = tf.expand_dims(mask_context, -1)
+        self.mask_context = tf.expand_dims(tf.cast(mask_context, tf.float32), -1)
 
     def __call__(self, inputs, state, scope=None):
         (c_prev, h_prev) = state
@@ -45,8 +45,7 @@ class MatchLSTMAttnCell(tc.rnn.LSTMCell):
             logits = tf.multiply(logits, self.mask_context)
             scores = tf.nn.softmax(logits, 1)
             attended_context = tf.reduce_sum(self.context_to_attend * scores, axis=1)
-            new_inputs = tf.concat([inputs, attended_context,
-                                    inputs - attended_context, inputs * attended_context],
+            new_inputs = tf.concat([inputs, attended_context],
                                    -1)
             return super(MatchLSTMAttnCell, self).__call__(new_inputs, state, scope)
 

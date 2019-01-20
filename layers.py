@@ -108,6 +108,9 @@ class SeqMatchSeqAttention(object):
                 num_units, name="hypothesis_mem_layer", use_bias=False)
             self.premise_mem_layer = layers_core.Dense(
                 num_units, name="premise_mem_layer", use_bias=False)
+            self.attention_layer = layers_core.Dense(
+                1, name="attention_layer", use_bias=True)
+            
             # Preprocess premise Memory
             # Shape: [batch_size, max_premise_len, num_units]
             self._keys = self.premise_mem_layer(premise_mem)
@@ -128,11 +131,10 @@ class SeqMatchSeqAttention(object):
                 self.hypothesis_mem_layer(hypothesis_mem), 1)
             # Shape: [batch_size, 1, num_units]
             processed_query = tf.expand_dims(self.query_layer(query), 1)
-            v = tf.get_variable(
-                "attention_v", [self._num_units], dtype=tf.float32)
             # Shape: [batch_size, max_premise_len]
-            score = tf.reduce_sum(
-                v * tf.tanh(self._keys + processed_hypothesis_mem + processed_query), [2])
+            bias = tf.get_variable("attentive_bias", shape=[1, 1, self._num_units], dtype=tf.float32)
+            logits = tf.tanh(self._keys + processed_hypothesis_mem + processed_query + bias)
+            score = tf.squeeze(self.attention_layer(logits), -1)
             # Mask score with -inf
             score_mask_values = float(
                 "-inf") * (1. - tf.cast(self._premise_mem_weights, tf.float32))
@@ -170,7 +172,7 @@ class SeqMatchSeqWrapper(rnn_cell_impl.RNNCell):
         # Concatenate attention and input
         cell_inputs = tf.concat([attention, inputs], axis=-1)
         # Call cell function
-        cell_output, next_state = self._cell(cell_inputs, cell_state)
+        cell_output, next_state = self._cell(cell_inputs, state)
 
         # Assemble next state
         return cell_output, next_state

@@ -1,6 +1,7 @@
 import tensorflow as tf
 from layers import *
 import numpy as np
+from match_layer import *
 
 
 rnnact_dict = {
@@ -91,21 +92,21 @@ class Decoder(object):
         # output attention is false because we want to output the cell output
         # and not the attention values
         with tf.variable_scope("match_lstm_attender"):
-            # attention_mechanism_fw = SeqMatchSeqAttention(
-            #     query_depth, encoded_question, masks_question)
-            # mLSTM_fw_cell = SeqMatchSeqWrapper(tf.contrib.rnn.BasicLSTMCell(self.hidden_size, state_is_tuple=True),
-            #                                    attention_mechanism_fw)
-            # attention_mechanism_bw = SeqMatchSeqAttention(
-            #     query_depth, encoded_question, masks_question)
-            # mLSTM_bw_cell = SeqMatchSeqWrapper(tf.contrib.rnn.BasicLSTMCell(self.hidden_size, state_is_tuple=True),
-            #                                    attention_mechanism_bw)
-            # (output_attender_fw, output_attender_bw), (state_attender_fw, state_attender_bw) = tf.nn.bidirectional_dynamic_rnn(
-            #     mLSTM_fw_cell,
-            #     mLSTM_bw_cell,
-            #     encoded_hypothesis,
-            #     sequence_length=masks_hypothesis,
-            #     dtype=tf.float32
-            # )
+            attention_mechanism_fw = SeqMatchSeqAttention(
+                query_depth, encoded_question, masks_question)
+            mLSTM_fw_cell = SeqMatchSeqWrapper(tf.contrib.rnn.BasicLSTMCell(self.hidden_size, state_is_tuple=True),
+                                               attention_mechanism_fw)
+            attention_mechanism_bw = SeqMatchSeqAttention(
+                query_depth, encoded_question, masks_question)
+            mLSTM_bw_cell = SeqMatchSeqWrapper(tf.contrib.rnn.BasicLSTMCell(self.hidden_size, state_is_tuple=True),
+                                               attention_mechanism_bw)
+            (output_attender_fw, output_attender_bw), (state_attender_fw, state_attender_bw) = tf.nn.bidirectional_dynamic_rnn(
+                mLSTM_fw_cell,
+                mLSTM_bw_cell,
+                encoded_hypothesis,
+                sequence_length=masks_hypothesis,
+                dtype=tf.float32
+            )
 
             # matchlstm_fw_cell = matchLSTMcell(query_depth, self.hidden_size, encoded_question,
             #                                   masks_question)
@@ -118,12 +119,12 @@ class Decoder(object):
             #     sequence_length=masks_hypothesis,
             #     dtype=tf.float32
             # )
-            cell_fw = MatchLSTMAttnCell(self.hidden_size, encoded_question, masks_question)
-            cell_bw = MatchLSTMAttnCell(self.hidden_size, encoded_question, masks_question)
-            (output_attender_fw, output_attender_bw), _ = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw,
-                                                                                          inputs=encoded_hypothesis,
-                                                                                          sequence_length=masks_hypothesis,
-                                                                                          dtype=tf.float32)
+            # cell_fw = MatchLSTMAttnCell(self.hidden_size, encoded_question, masks_question)
+            # cell_bw = MatchLSTMAttnCell(self.hidden_size, encoded_question, masks_question)
+            # (output_attender_fw, output_attender_bw), _ = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw,
+            #                                                                               inputs=encoded_hypothesis,
+            #                                                                               sequence_length=masks_hypothesis,
+            #                                                                               dtype=tf.float32)
         if return_sequence:
             output_attender = tf.concat(
                 [output_attender_fw, output_attender_bw], -1)
