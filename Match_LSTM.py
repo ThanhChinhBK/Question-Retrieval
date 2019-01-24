@@ -185,6 +185,7 @@ class Decoder(object):
             output_projection = tf.layers.dense(input_projection,
                                                 output_dim,
                                                 name="projection_final")
+            output_projection = tf.nn.dropout(output_projection, self.dropout)
         return output_projection
 
     def decode(self, encoded_rep, q_rep, masks):
@@ -203,8 +204,11 @@ class Decoder(object):
         output_attender = self.run_match_lstm(encoded_rep, masks, True)
         #output_cnn = cnnsum(output_attender, self.dropout)
         output_maxpool = tf.reduce_max(output_attender, 1)
-        logits = self.run_projection(output_maxpool, 1, "SemEval_projection")
-        logits_SNLI = self.run_projection(output_maxpool, 3, "SNLI_projection")
+        output_meanpool = tf.reduce_mean(output_attender, 1)
+        outputs = tf.concat([output_maxpool, output_meanpool], -1)
+        ourputs = tf.nn.dropout(outputs, self.dropout)
+        logits = self.run_projection(outputs, 1, "SemEval_projection")
+        logits_SNLI = self.run_projection(outputs, 3, "SNLI_projection")
         logits_SQUAD = self.run_answer_ptr(
             output_attender, masks, "SQUAD_ans_ptr")
         return logits, logits_SNLI, logits_SQUAD

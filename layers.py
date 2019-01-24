@@ -170,7 +170,7 @@ class SeqMatchSeqWrapper(rnn_cell_impl.RNNCell):
         # Calculate attention
         attention = self._attention_mechanism(inputs, hidden_state)
         # Concatenate attention and input
-        cell_inputs = tf.concat([attention, inputs], axis=-1)
+        cell_inputs = tf.concat([attention, inputs, inputs-attention, inputs*attention], axis=-1)
         # Call cell function
         cell_output, next_state = self._cell(cell_inputs, state)
 

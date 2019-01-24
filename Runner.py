@@ -105,6 +105,7 @@ def load_data(trainf, valf, testf):
         inp_tr, y_train, vocab, char_vocab = load_set(trainf, vocab, char_vocab, iseval=False)
     else:
         vocab = pickle.load(open("vocab.pkl", "rb"))
+        char_vocab = pickle.load(open("char_vocab.pkl", "rb"))
         inp_tr, y_train = load_set(trainf, vocab, char_vocab, iseval=True)
     inp_val, y_val = load_set(valf, vocab, char_vocab, iseval=True)
     #inp_test, y_test = load_set(testf, vocab=vocab, iseval=True)
