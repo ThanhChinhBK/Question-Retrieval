@@ -4,6 +4,7 @@ import numpy as np
 import datetime
 from Match_LSTM import MatchLSTM
 from Rnet import Rnet
+from ESIM_model import ESIM
 import json
 import os
 import DataUtils
@@ -30,7 +31,7 @@ tf.flags.DEFINE_string("bidi_mode", "concatenate", "")
 tf.flags.DEFINE_boolean("use_cudnn", True, "")
 # word vector config
 tf.flags.DEFINE_string(
-    "embedding_path", "glove.6B.300d.txt", "word embedding path")
+    "embedding_path", "glove.6B.50d.txt", "word embedding path")
 tf.flags.DEFINE_boolean("use_char_embedding", True, "")
 tf.flags.DEFINE_integer("char_embedding_dim", 50, "")
 tf.flags.DEFINE_integer("char_pad", 15, "")
@@ -208,7 +209,7 @@ if __name__ == "__main__":
         allow_soft_placement=FLAGS.allow_soft_placement,
         log_device_placement=FLAGS.log_device_placement)
     sess = tf.Session(config=session_conf) 
-    model = MatchLSTM(FLAGS, vocab, char_vocab, emb)
+    model = ESIM(FLAGS, vocab, char_vocab, emb)
     
     checkpoint_dir = os.path.abspath(os.path.join(FLAGS.out_dir, "checkpoints"))
     if not os.path.exists(checkpoint_dir):
