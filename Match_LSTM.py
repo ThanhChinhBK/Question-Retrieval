@@ -58,10 +58,10 @@ class Encoder(object):
             p_rep = tf.concat((p_rep_f, p_rep_b), -1)
 
         # outputs beyond sequence lengths are masked with 0s
-        encoded_question = tf.tanh(
-            tf.layers.batch_normalization(encoded_question))
-        encoded_hypothesis = tf.tanh(
-            tf.layers.batch_normalization(encoded_hypothesis))
+        #encoded_question = tf.tanh(
+        #    tf.layers.batch_normalization(encoded_question))
+        #encoded_hypothesis = tf.tanh(
+        #    tf.layers.batch_normalization(encoded_hypothesis))
         q_rep = tf.tanh(tf.layers.batch_normalization(q_rep))
         p_rep = tf.tanh(tf.layers.batch_normalization(p_rep))
         encoded_question = tf.nn.dropout(encoded_question, self.dropout)

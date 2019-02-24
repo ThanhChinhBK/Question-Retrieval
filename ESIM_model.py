@@ -43,7 +43,8 @@ class ESIMEncoder(object):
         with tf.variable_scope("encoded", reuse=True):
             (encoded_hypothesis_f, encoded_hypothesis_b), _ = tf.nn.bidirectional_dynamic_rnn(
                 fw_lstm_cell, bw_lstm_cell,
-                hypothesis, masks_hypothesis, dtype=tf.float32)
+                hypothesis, masks_hypothesis,
+                dtype=tf.float32)
             encoded_hypothesis = tf.concat(
                 (encoded_hypothesis_f, encoded_hypothesis_b), -1)  # (-1, P, 2*H)
 
@@ -111,7 +112,8 @@ class ESIMDecoder(object):
         with tf.variable_scope("decoded", reuse=True):
             (decoded_hypothesis_f, decoded_hypothesis_b), _ = tf.nn.bidirectional_dynamic_rnn(
                 fw_lstm_cell, bw_lstm_cell,
-                encoded_hypothesis, masks_hypothesis, dtype=tf.float32)
+                encoded_hypothesis, masks_hypothesis,
+                dtype=tf.float32)
             decoded_hypothesis = tf.concat(
                 (decoded_hypothesis_f, decoded_hypothesis_b), -1)  # (-1, P, 2*H)
 

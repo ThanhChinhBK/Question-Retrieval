@@ -9,6 +9,8 @@ import json
 import os
 import DataUtils
 from nltk.tokenize import word_tokenize
+import spacy
+enNLP = spacy.load("en")
 from tqdm import *
 from sklearn.metrics import accuracy_score
 
@@ -31,7 +33,7 @@ tf.flags.DEFINE_string("bidi_mode", "concatenate", "")
 tf.flags.DEFINE_boolean("use_cudnn", True, "")
 # word vector config
 tf.flags.DEFINE_string(
-    "embedding_path", "glove.6B.50d.txt", "word embedding path")
+    "embedding_path", "glove.6B.300d.txt", "word embedding path")
 tf.flags.DEFINE_boolean("use_char_embedding", True, "")
 tf.flags.DEFINE_integer("char_embedding_dim", 50, "")
 tf.flags.DEFINE_integer("char_pad", 15, "")
@@ -58,6 +60,9 @@ def load_data_from_file(dsfile):
             stext = l.strip().split("\t")[1]
             q_tok = word_tokenize(qtext.lower())
             s_tok = word_tokenize(stext.lower())
+            #q_tok = [w.string.strip() for w in enNLP(qtext.lower())]
+            #s_tok = [w.string.strip() for w in enNLP(stext.lower())]
+        
             q.append(q_tok)
             q_l.append(min(len(q_tok), FLAGS.pad))
             sents.append(s_tok)
@@ -113,12 +118,14 @@ def load_data(trainf, valf, testf):
 
 
 def SNLI_train_step(sess, model, data_batch):
-    q_batch, s_batch, ql_batch, sl_batch, y_batch = data_batch
+    q_batch, s_batch, q_char_batch, s_char_batch, ql_batch, sl_batch, y_batch = data_batch
     y_batch_onehot = np.eye(3)[y_batch]
     feed_dict = {
         model.queries : q_batch,
+        model.queries_char : q_char_batch,
         #model.queries_length : ql_batch,
         model.hypothesis : s_batch,
+        model.hypothesis_char : s_char_batch,
         #model.hypothesis_length : sl_batch,
         model.dropout : FLAGS.dropout,
         model.y_SNLI : y_batch_onehot
@@ -143,15 +150,17 @@ def train_step(sess, model, data_batch):
 
 
 def SNLI_test_step(sess, model, test_data):
-    q_test, s_test, ql_test, sl_test, y_test = test_data
+    q_test, s_test, q_char_batch, s_char_batch, ql_test, sl_test, y_test = test_data
     final_pred = []
     final_loss = []
     for i in range(0, len(y_test), FLAGS.batch_size):
         y_test_onehot = np.eye(3)[y_test[i:i+FLAGS.batch_size]]
         feed_dict = {
             model.queries : q_test[i:i+FLAGS.batch_size],
+            model.queries_char : q_char_batch,
             #model.queries_length : ql_test[i:i+FLAGS.batch_size],
             model.hypothesis : s_test[i:i+FLAGS.batch_size],
+            model.hypothesis_char : s_char_batch,
             #model.hypothesis_length : sl_test[i:i+FLAGS.batch_size],
             model.y_SNLI : y_test_onehot,
             model.dropout : 1.0
@@ -209,7 +218,7 @@ if __name__ == "__main__":
         allow_soft_placement=FLAGS.allow_soft_placement,
         log_device_placement=FLAGS.log_device_placement)
     sess = tf.Session(config=session_conf) 
-    model = ESIM(FLAGS, vocab, char_vocab, emb)
+    model = MatchLSTM(FLAGS, vocab, char_vocab, emb)
     
     checkpoint_dir = os.path.abspath(os.path.join(FLAGS.out_dir, "checkpoints"))
     if not os.path.exists(checkpoint_dir):
@@ -235,6 +244,7 @@ if __name__ == "__main__":
         last_checkpoint = tf.train.latest_checkpoint(checkpoint_dir)
         saver.restore(sess,last_checkpoint)
         print("loaded model from checkpoint {}".format(last_checkpoint))
+        SemEval_test_step(sess, model, test_data, callback)
     for e in range(FLAGS.epochs):
         t = tqdm(range(0, len(y_train), FLAGS.batch_size), desc='train loss: %.6f' %0.0, ncols=100)
         for i in t:
