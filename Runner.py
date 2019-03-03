@@ -196,8 +196,7 @@ def SemEval_test_step(sess, model, test_data, call_back, debug=False):
         final_loss += [loss] * len(pred_label)
     print("loss in valid set :{}".format(np.mean(final_loss)))
     if debug:
-        callback.on_debug(final_pred)
-        
+        callback.on_debug(final_pred)        
     logs = call_back.on_epoch_end(final_pred)
     #print("In dev set: loss: {} MMR: {} MAP: {}".format(loss, logs['mrr'], logs['map']))
     return logs['map']
@@ -214,7 +213,9 @@ if __name__ == "__main__":
     pickle.dump(vocab, open("vocab.pkl","wb"))
     print("Load Glove")
     emb = DataUtils.GloVe(FLAGS.embedding_path)
+    gpu_options = tf.GPUOptions(allow_growth=True)
     session_conf = tf.ConfigProto(
+        gpu_options=gpu_options,
         allow_soft_placement=FLAGS.allow_soft_placement,
         log_device_placement=FLAGS.log_device_placement)
     sess = tf.Session(config=session_conf) 
@@ -239,12 +240,13 @@ if __name__ == "__main__":
         last_checkpoint = tf.train.latest_checkpoint(checkpoint_dir)
         saver.restore(sess,last_checkpoint)
         print("loaded model from checkpoint {}".format(last_checkpoint))
-        SemEval_test_step(sess, model, test_data, callback)
+        SemEval_test_step(sess, model, test_data, callback, debug=True)
+        exit()
     else:
         last_checkpoint = tf.train.latest_checkpoint(checkpoint_dir)
         saver.restore(sess,last_checkpoint)
         print("loaded model from checkpoint {}".format(last_checkpoint))
-        SemEval_test_step(sess, model, test_data, callback)
+        best_map=SemEval_test_step(sess, model, test_data, callback, debug=True)
     for e in range(FLAGS.epochs):
         t = tqdm(range(0, len(y_train), FLAGS.batch_size), desc='train loss: %.6f' %0.0, ncols=100)
         for i in t:

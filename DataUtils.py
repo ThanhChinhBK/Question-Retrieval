@@ -478,14 +478,20 @@ class AnsSelCB():
         logs['map'] = map__
         return logs
 
-    def on_debug(self, pred, thresold=0.6, fn="debug.txt"):
+    def on_debug(self, pred, thresold=0.97, fn="debug.txt"):
         fw = open(fn , "w")
-        q_uniq = set(self.val_q)
+        q_uniq = list(set([' '.join(i) for i in self.val_q]))
+        count = 0
         MAP =  map_(self.val_q, self.val_y, pred, debug=True)
         for i, _map in enumerate(MAP):
-            if _map < thresold:
+            fw.write("*"*50+"\n")
+            fw.write("\n")
+            fw.write("*"*50+'\n')
+            if _map > thresold and _map != 0:
+                count += 1
+                print(count)
                 fw.write("%.6f\t%s\n" %(_map, q_uniq[i]))
                 for j in range(10):
                     ind = i * 10 + j
-                    fw.write("%s\t%d\t%.6f\n" %(self.val_s[ind], self.val_y[ind], pred[ind]))
+                    fw.write("%s\t%d\t%.6f\n" %(' '.join(self.val_s[ind]), self.val_y[ind], pred[ind]))
         fw.close()

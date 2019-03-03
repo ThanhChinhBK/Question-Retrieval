@@ -35,33 +35,37 @@ class Encoder(object):
 
         # read hypothesis conditioned upon the question
         with tf.variable_scope("encoded_question"):
-            lstm_cell_question = tf.contrib.rnn.BasicLSTMCell(
+            bw_lstm_cell_question = tf.contrib.rnn.BasicLSTMCell(
+                self.hidden_size, state_is_tuple=True)
+            fw_lstm_cell_question = tf.contrib.rnn.BasicLSTMCell(
                 self.hidden_size, state_is_tuple=True)
             # encoded_question, (q_rep, _) = tf.nn.dynamic_rnn(
             # lstm_cell_question, question, masks_question, dtype=tf.float32)
             # # (-1, Q, H)
             (encoded_question_f, encoded_question_b), ((q_rep_f, _), (q_rep_b, _)) = tf.nn.bidirectional_dynamic_rnn(
-                lstm_cell_question, lstm_cell_question, question, masks_question, dtype=tf.float32)
+                fw_lstm_cell_question, bw_lstm_cell_question, question, masks_question, dtype=tf.float32)
             encoded_question = tf.concat(
                 (encoded_question_f, encoded_question_b), -1)  # (-1, P, 2*H)
             q_rep = tf.concat((q_rep_f, q_rep_b), -1)
         with tf.variable_scope("encoded_hypothesis"):
-            lstm_cell_hypothesis = tf.contrib.rnn.BasicLSTMCell(
+            fw_lstm_cell_hypothesis = tf.contrib.rnn.BasicLSTMCell(
+                self.hidden_size, state_is_tuple=True)
+            bw_lstm_cell_hypothesis = tf.contrib.rnn.BasicLSTMCell(
                 self.hidden_size, state_is_tuple=True)
             # encoded_hypothesis, (p_rep, _) = tf.nn.dynamic_rnn(
             # lstm_cell_hypothesis, hypothesis, masks_hypothesis,
             # dtype=tf.float32)  # (-1, P, H)
             (encoded_hypothesis_f, encoded_hypothesis_b), ((p_rep_f, _), (p_rep_b, _)) = tf.nn.bidirectional_dynamic_rnn(
-                lstm_cell_hypothesis, lstm_cell_hypothesis, hypothesis, masks_hypothesis, dtype=tf.float32)
+                fw_lstm_cell_hypothesis, bw_lstm_cell_hypothesis, hypothesis, masks_hypothesis, dtype=tf.float32)
             encoded_hypothesis = tf.concat(
                 (encoded_hypothesis_f, encoded_hypothesis_b), -1)  # (-1, P, 2*H)
             p_rep = tf.concat((p_rep_f, p_rep_b), -1)
 
         # outputs beyond sequence lengths are masked with 0s
-        #encoded_question = tf.tanh(
-        #    tf.layers.batch_normalization(encoded_question))
-        #encoded_hypothesis = tf.tanh(
-        #    tf.layers.batch_normalization(encoded_hypothesis))
+        encoded_question = tf.tanh(
+            tf.layers.batch_normalization(encoded_question))
+        encoded_hypothesis = tf.tanh(
+            tf.layers.batch_normalization(encoded_hypothesis))
         q_rep = tf.tanh(tf.layers.batch_normalization(q_rep))
         p_rep = tf.tanh(tf.layers.batch_normalization(p_rep))
         encoded_question = tf.nn.dropout(encoded_question, self.dropout)
@@ -82,7 +86,7 @@ class Decoder(object):
     def run_match_lstm(self, encoded_rep, masks, return_sequence=False):
         encoded_question, encoded_hypothesis = encoded_rep
         masks_question, masks_hypothesis = masks
-        masks_hypothesis = tf.reduce_sum(masks_hypothesis, -1)
+        masks_hypothesis_sum = tf.reduce_sum(masks_hypothesis, -1)
         #masks_question = tf.reduce_sum(masks_question, -1)
         match_lstm_cell_attention_fn = lambda curr_input, state: tf.concat(
             [curr_input, state], axis=-1)
@@ -104,7 +108,7 @@ class Decoder(object):
                 mLSTM_fw_cell,
                 mLSTM_bw_cell,
                 encoded_hypothesis,
-                sequence_length=masks_hypothesis,
+                sequence_length=masks_hypothesis_sum,
                 dtype=tf.float32
             )
 
@@ -133,7 +137,28 @@ class Decoder(object):
                 [state_attender_fw[0].h, state_attender_bw[0].h], axis=-1)  # (-1, 2*H)
         output_attender = tf.tanh(
             tf.layers.batch_normalization(output_attender))
-        output_attender = tf.nn.dropout(output_attender, self.dropout)
+        # self_attention_inputs = output_attender
+        # self_attention_depth = output_attender.get_shape().as_list()[-1]
+        # print("self attention depth", self_attention_depth)
+        # with tf.variable_scope("self_match_lstm_attender"):
+        #     self_attention_mechanism_fw = SeqMatchSeqAttention(
+        #         self_attention_depth, self_attention_inputs, masks_hypothesis)
+        #     self_mLSTM_fw_cell = SeqMatchSeqWrapper(tf.contrib.rnn.BasicLSTMCell(self.hidden_size, state_is_tuple=True),
+        #                                             self_attention_mechanism_fw)
+        #     self_attention_mechanism_bw = SeqMatchSeqAttention(
+        #         self_attention_depth, self_attention_inputs, masks_hypothesis)
+        #     self_mLSTM_bw_cell = SeqMatchSeqWrapper(tf.contrib.rnn.BasicLSTMCell(self.hidden_size, state_is_tuple=True),
+        #                                             self_attention_mechanism_bw)
+        #     (output_attender_fw, output_attender_bw), (state_attender_fw, state_attender_bw) = tf.nn.bidirectional_dynamic_rnn(
+        #         self_mLSTM_fw_cell,
+        #         self_mLSTM_bw_cell,
+        #         self_attention_inputs,
+        #         sequence_length=masks_hypothesis_sum,
+        #         dtype=tf.float32
+        #     )
+        # output_attender = tf.concat(
+        #         [output_attender_fw, output_attender_bw], -1)
+        # output_attender = tf.nn.dropout(output_attender, self.dropout)
         return output_attender
 
     def run_answer_ptr(self, output_attender, masks, scope="ans_ptr"):
@@ -227,7 +252,7 @@ class MatchLSTM(object):
         
         self._add_embedding()
         self.encoder = Encoder(self.config.hidden_layer, self.dropout)
-        self.decoder = Decoder(self.config.hidden_layer * 2,
+        self.decoder = Decoder(self.config.hidden_layer ,
                                self.Ddim, self.dropout)
         self._build_model()
         self.train_op = tf.train.AdamOptimizer(
