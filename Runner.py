@@ -13,12 +13,14 @@ import spacy
 enNLP = spacy.load("en")
 from tqdm import *
 from sklearn.metrics import accuracy_score
+from configs import cfg
+from bibloSA.exp_context_fusion import ModelContextFusion
 
 
 tf.flags.DEFINE_string("dataset", "SemEval", "SemEval/QNLI")
 tf.flags.DEFINE_string("mode", "pretrained", "pretrained/tranfer")
 # Training hyperparameter config
-tf.flags.DEFINE_integer("batch_size", 64, "batch size")
+tf.flags.DEFINE_integer("batch_size", 2, "batch size")
 tf.flags.DEFINE_integer("epochs", 160, "epochs")
 tf.flags.DEFINE_float("learning_rate", 1e-4, "learning rate")
 tf.flags.DEFINE_float("grad_clip", 5.0, "")
@@ -33,7 +35,7 @@ tf.flags.DEFINE_string("bidi_mode", "concatenate", "")
 tf.flags.DEFINE_boolean("use_cudnn", True, "")
 # word vector config
 tf.flags.DEFINE_string(
-    "embedding_path", "glove.6B.300d.txt", "word embedding path")
+    "embedding_path", "glove.6B.50d.txt", "word embedding path")
 tf.flags.DEFINE_boolean("use_char_embedding", True, "")
 tf.flags.DEFINE_integer("char_embedding_dim", 50, "")
 tf.flags.DEFINE_integer("char_pad", 15, "")
@@ -136,14 +138,15 @@ def SNLI_train_step(sess, model, data_batch):
 def train_step(sess, model, data_batch):
     q_batch, s_batch, q_char_batch, s_char_batch, ql_batch, sl_batch, y_batch = data_batch
     feed_dict = {
-        model.queries : q_batch,
-        model.queries_char : q_char_batch,
+        model.sent1_token : q_batch,
+        model.sent1_char : q_char_batch,
         #model.queries_length : ql_batch,
-        model.hypothesis : s_batch,
-        model.hypothesis_char : s_char_batch,
+        model.sent2_token : s_batch,
+        model.sent2_char : s_char_batch,
         #model.hypothesis_length : sl_batch,
-        model.dropout : FLAGS.dropout,
-        model.y : y_batch
+        #model.dropout : FLAGS.dropout,
+        model.gold_label : y_batch,
+        model.is_train : True
     }
     _, loss = sess.run([model.train_op, model.loss], feed_dict=feed_dict)
     return loss
@@ -181,14 +184,15 @@ def SemEval_test_step(sess, model, test_data, call_back, debug=False):
     final_loss = []
     for i in range(0, len(y_test), FLAGS.batch_size):
         feed_dict = {
-            model.queries : q_test[i:i+FLAGS.batch_size],
-            model.queries_char: q_char_batch[i:i+FLAGS.batch_size],
+            model.sent1_token : q_test[i:i+FLAGS.batch_size],
+            model.sent1_char: q_char_batch[i:i+FLAGS.batch_size],
             #model.queries_length : ql_test[i:i+FLAGS.batch_size],
-            model.hypothesis : s_test[i:i+FLAGS.batch_size],
-            model.hypothesis_char : s_char_batch[i:i+FLAGS.batch_size],
+            model.sent2_token : s_test[i:i+FLAGS.batch_size],
+            model.sent2_char : s_char_batch[i:i+FLAGS.batch_size],
             #model.hypothesis_length : sl_test[i:i+FLAGS.batch_size],
-            model.y : y_test[i:i+FLAGS.batch_size],
-            model.dropout : 1.0
+            model.gold_label : y_test[i:i+FLAGS.batch_size],
+            model.is_train : False
+            #model.dropout : 1.0
         }
         loss, pred_label = sess.run([model.loss, model.yp], feed_dict=feed_dict)
         pred_label = list(pred_label.reshape((-1,1)))
@@ -203,7 +207,7 @@ def SemEval_test_step(sess, model, test_data, call_back, debug=False):
 
 
 if __name__ == "__main__":
-    trainf = os.path.join(FLAGS.dataset, 'train.txt')
+    trainf = os.path.join(FLAGS.dataset, 'test.txt')
     valf = os.path.join(FLAGS.dataset, 'test.txt')
     testf = os.path.join(FLAGS.dataset, 'dev.txt')
     best_map = 0
@@ -219,7 +223,9 @@ if __name__ == "__main__":
         allow_soft_placement=FLAGS.allow_soft_placement,
         log_device_placement=FLAGS.log_device_placement)
     sess = tf.Session(config=session_conf) 
-    model = MatchLSTM(FLAGS, vocab, char_vocab, emb)
+    #model = MatchLSTM(FLAGS, vocab, char_vocab, emb)
+    model = ModelContextFusion(None, vocab.embmatrix(emb), vocab.size(),
+                               char_vocab.size(), FLAGS.pad, "abcdef")
     
     checkpoint_dir = os.path.abspath(os.path.join(FLAGS.out_dir, "checkpoints"))
     if not os.path.exists(checkpoint_dir):
