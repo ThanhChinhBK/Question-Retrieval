@@ -265,15 +265,15 @@ class MatchLSTM(object):
     def _add_placeholder(self):
         with tf.variable_scope("placeholder"):
             self.queries = tf.placeholder(
-                tf.int32, [None, self.config.pad], "queries")
+                tf.int32, [None, self.config.pad_question], "queries")
             self.queries_char = tf.placeholder(
-                tf.int32, [None, self.config.pad, self.config.char_pad], "queries")
+                tf.int32, [None, self.config.pad_question, self.config.char_pad], "queries")
             # self.queries_length = tf.placeholder(
             #    tf.int32, [None], "queries_length")
             self.hypothesis = tf.placeholder(
-                tf.int32, [None, self.config.pad], "hypothesis")
+                tf.int32, [None, self.config.pad_sentence], "hypothesis")
             self.hypothesis_char = tf.placeholder(
-                tf.int32, [None, self.config.pad, self.config.char_pad], "queries")
+                tf.int32, [None, self.config.pad_sentence, self.config.char_pad], "queries")
             # self.hypothesis_length = tf.placeholder(
             #    tf.int32, [None], "hypothesis_length")
             self.y = tf.placeholder(
@@ -317,9 +317,9 @@ class MatchLSTM(object):
                 cell_fw, cell_bw, cq_embedding, self.queries_char_length, dtype=tf.float32)
             cq_emb = tf.concat([state_fw, state_bw], axis=1)
             cq_emb = tf.reshape(
-                cq_emb, [-1, self.config.pad, 2 * self.config.char_embedding_dim])
+                cq_emb, [-1, self.config.pad_question, 2 * self.config.char_embedding_dim])
             ch_emb = tf.reshape(
-                ch_emb, [-1, self.config.pad, 2 * self.config.char_embedding_dim])
+                ch_emb, [-1, self.config.pad_sentence, 2 * self.config.char_embedding_dim])
         with tf.variable_scope("word_embeddings"):
             init_emb = tf.constant(self.vocab.embmatrix(
                 self.word_embedding), dtype=tf.float32)
