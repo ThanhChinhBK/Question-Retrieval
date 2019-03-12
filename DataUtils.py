@@ -438,7 +438,7 @@ def map_(s0, y, ypred, debug=False):
                 precisions.append(num_correct / (i + 1))
         if len(precisions):
             avg_prec = sum(precisions) / len(precisions)
-        MAP.append(avg_prec)
+            MAP.append(avg_prec)
     if debug:
         return MAP
     else:

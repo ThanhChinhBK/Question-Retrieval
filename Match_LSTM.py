@@ -86,7 +86,7 @@ class Decoder(object):
     def run_match_lstm(self, encoded_rep, masks, return_sequence=False):
         encoded_question, encoded_hypothesis = encoded_rep
         masks_question, masks_hypothesis = masks
-        masks_hypothesis_sum = tf.reduce_sum(masks_hypothesis, -1)
+        masks_hypothesis = tf.reduce_sum(masks_hypothesis, -1)
         #masks_question = tf.reduce_sum(masks_question, -1)
         match_lstm_cell_attention_fn = lambda curr_input, state: tf.concat(
             [curr_input, state], axis=-1)
@@ -108,13 +108,13 @@ class Decoder(object):
                 mLSTM_fw_cell,
                 mLSTM_bw_cell,
                 encoded_hypothesis,
-                sequence_length=masks_hypothesis_sum,
+                sequence_length=masks_hypothesis,
                 dtype=tf.float32
             )
 
-            # matchlstm_fw_cell = matchLSTMcell(query_depth, self.hidden_size, encoded_question,
+            # matchlstm_fw_cell = MatchLSTMAttnCell(query_depth, self.hidden_size, encoded_question,
             #                                   masks_question)
-            # matchlstm_bw_cell = matchLSTMcell(query_depth, self.hidden_size, encoded_question,
+            # matchlstm_bw_cell = MatchLSTMAttnCell(query_depth, self.hidden_size, encoded_question,
             #                                   masks_question)
             # (output_attender_fw, output_attender_bw), _ = tf.nn.bidirectional_dynamic_rnn(
             #     matchlstm_fw_cell,
@@ -129,14 +129,15 @@ class Decoder(object):
             #                                                                               inputs=encoded_hypothesis,
             #                                                                               sequence_length=masks_hypothesis,
             #                                                                               dtype=tf.float32)
-        if return_sequence:
-            output_attender = tf.concat(
-                [output_attender_fw, output_attender_bw], -1)
-        else:
-            output_attender = tf.concat(
-                [state_attender_fw[0].h, state_attender_bw[0].h], axis=-1)  # (-1, 2*H)
+            
+        output_attender = tf.concat(
+            [output_attender_fw, output_attender_bw], -1)
+        state_attender = tf.concat(
+            [state_attender_fw[0].h, state_attender_bw[0].h], axis=-1)  # (-1, 2*H)
         output_attender = tf.tanh(
             tf.layers.batch_normalization(output_attender))
+        state_attender = tf.tanh(
+            tf.layers.batch_normalization(state_attender))
         # self_attention_inputs = output_attender
         # self_attention_depth = output_attender.get_shape().as_list()[-1]
         # print("self attention depth", self_attention_depth)
@@ -159,7 +160,7 @@ class Decoder(object):
         # output_attender = tf.concat(
         #         [output_attender_fw, output_attender_bw], -1)
         # output_attender = tf.nn.dropout(output_attender, self.dropout)
-        return output_attender
+        return output_attender, state_attender
 
     def run_answer_ptr(self, output_attender, masks, scope="ans_ptr"):
         with tf.variable_scope(scope):
@@ -226,14 +227,14 @@ class Decoder(object):
         :return: logits: for each word in hypothesis the probability that it is the start word and end word.
         """
 
-        output_attender = self.run_match_lstm(encoded_rep, masks, True)
+        output_attender, state_attender = self.run_match_lstm(encoded_rep, masks, False)
         #output_cnn = cnnsum(output_attender, self.dropout)
-        output_maxpool = tf.reduce_max(output_attender, 1)
-        output_meanpool = tf.reduce_mean(output_attender, 1)
-        outputs = tf.concat([output_maxpool, output_meanpool], -1)
-        ourputs = tf.nn.dropout(outputs, self.dropout)
-        logits = self.run_projection(outputs, 1, "SemEval_projection")
-        logits_SNLI = self.run_projection(outputs, 3, "SNLI_projection")
+        #output_maxpool = tf.reduce_max(output_attender, 1)
+        #output_meanpool = tf.reduce_mean(output_attender, 1)
+        #outputs = tf.concat([output_maxpool, output_meanpool], -1)
+        #ourputs = tf.nn.dropout(outputs, self.dropout)
+        logits = self.run_projection(state_attender, 1, "SemEval_projection")
+        logits_SNLI = self.run_projection(state_attender, 3, "SNLI_projection")
         logits_SQUAD = self.run_answer_ptr(
             output_attender, masks, "SQUAD_ans_ptr")
         return logits, logits_SNLI, logits_SQUAD

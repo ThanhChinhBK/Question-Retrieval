@@ -18,14 +18,14 @@ from sklearn.metrics import accuracy_score
 tf.flags.DEFINE_string("dataset", "SemEval", "SemEval/QNLI")
 tf.flags.DEFINE_string("mode", "pretrained", "pretrained/tranfer")
 # Training hyperparameter config
-tf.flags.DEFINE_integer("batch_size", 2, "batch size")
+tf.flags.DEFINE_integer("batch_size", 64, "batch size")
 tf.flags.DEFINE_integer("epochs", 160, "epochs")
 tf.flags.DEFINE_float("learning_rate", 1e-4, "learning rate")
 tf.flags.DEFINE_float("grad_clip", 5.0, "")
 # LSTM config
 tf.flags.DEFINE_integer("hidden_layer", 300, "")
-tf.flags.DEFINE_integer("pad_question", 30, "")
-tf.flags.DEFINE_integer("pad_sentence", 100, "")
+tf.flags.DEFINE_integer("pad_question", 50, "")
+tf.flags.DEFINE_integer("pad_sentence", 50, "")
 tf.flags.DEFINE_float("dropout", 0.3, "")
 tf.flags.DEFINE_string("Ddim", "2", "")
 tf.flags.DEFINE_boolean("bidi", True, "")
@@ -34,7 +34,7 @@ tf.flags.DEFINE_string("bidi_mode", "concatenate", "")
 tf.flags.DEFINE_boolean("use_cudnn", True, "")
 # word vector config
 tf.flags.DEFINE_string(
-    "embedding_path", "glove.6B.50d.txt", "word embedding path")
+    "embedding_path", "glove.6B.300d.txt", "word embedding path")
 tf.flags.DEFINE_boolean("use_char_embedding", True, "")
 tf.flags.DEFINE_integer("char_embedding_dim", 50, "")
 tf.flags.DEFINE_integer("char_pad", 15, "")
@@ -138,15 +138,14 @@ def SNLI_train_step(sess, model, data_batch):
 def train_step(sess, model, data_batch):
     q_batch, s_batch, q_char_batch, s_char_batch, ql_batch, sl_batch, y_batch = data_batch
     feed_dict = {
-        model.sent1_token : q_batch,
-        model.sent1_char : q_char_batch,
+        model.queries : q_batch,
+        model.queries_char : q_char_batch,
         #model.queries_length : ql_batch,
-        model.sent2_token : s_batch,
-        model.sent2_char : s_char_batch,
+        model.hypothesis : s_batch,
+        model.hypothesis_char : s_char_batch,
         #model.hypothesis_length : sl_batch,
-        #model.dropout : FLAGS.dropout,
-        model.gold_label : y_batch,
-        model.is_train : True
+        model.dropout : FLAGS.dropout,
+        model.y : y_batch,
     }
     _, loss = sess.run([model.train_op, model.loss], feed_dict=feed_dict)
     return loss
@@ -160,10 +159,10 @@ def SNLI_test_step(sess, model, test_data):
         y_test_onehot = np.eye(3)[y_test[i:i+FLAGS.batch_size]]
         feed_dict = {
             model.queries : q_test[i:i+FLAGS.batch_size],
-            model.queries_char : q_char_batch,
+            model.queries_char : q_char_batch[i:i+FLAGS.batch_size],
             #model.queries_length : ql_test[i:i+FLAGS.batch_size],
             model.hypothesis : s_test[i:i+FLAGS.batch_size],
-            model.hypothesis_char : s_char_batch,
+            model.hypothesis_char : s_char_batch[i:i+FLAGS.batch_size],
             #model.hypothesis_length : sl_test[i:i+FLAGS.batch_size],
             model.y_SNLI : y_test_onehot,
             model.dropout : 1.0
@@ -184,15 +183,14 @@ def SemEval_test_step(sess, model, test_data, call_back, debug=False):
     final_loss = []
     for i in range(0, len(y_test), FLAGS.batch_size):
         feed_dict = {
-            model.sent1_token : q_test[i:i+FLAGS.batch_size],
-            model.sent1_char: q_char_batch[i:i+FLAGS.batch_size],
+            model.queries : q_test[i:i+FLAGS.batch_size],
+            model.queries_char: q_char_batch[i:i+FLAGS.batch_size],
             #model.queries_length : ql_test[i:i+FLAGS.batch_size],
-            model.sent2_token : s_test[i:i+FLAGS.batch_size],
-            model.sent2_char : s_char_batch[i:i+FLAGS.batch_size],
+            model.hypothesis : s_test[i:i+FLAGS.batch_size],
+            model.hypothesis_char : s_char_batch[i:i+FLAGS.batch_size],
             #model.hypothesis_length : sl_test[i:i+FLAGS.batch_size],
-            model.gold_label : y_test[i:i+FLAGS.batch_size],
-            model.is_train : False
-            #model.dropout : 1.0
+            model.y : y_test[i:i+FLAGS.batch_size],
+            model.dropout : 1.0
         }
         loss, pred_label = sess.run([model.loss, model.yp], feed_dict=feed_dict)
         pred_label = list(pred_label.reshape((-1,1)))
@@ -207,7 +205,7 @@ def SemEval_test_step(sess, model, test_data, call_back, debug=False):
 
 
 if __name__ == "__main__":
-    trainf = os.path.join(FLAGS.dataset, 'test.txt')
+    trainf = os.path.join(FLAGS.dataset, 'train.txt')
     valf = os.path.join(FLAGS.dataset, 'test.txt')
     testf = os.path.join(FLAGS.dataset, 'dev.txt')
     best_map = 0
@@ -253,6 +251,7 @@ if __name__ == "__main__":
     for e in range(FLAGS.epochs):
         t = tqdm(range(0, len(y_train), FLAGS.batch_size), desc='train loss: %.6f' %0.0, ncols=100)
         for i in t:
+            train_loss = []
             data_batch = [ inp_tr['qi'][i:i+FLAGS.batch_size],
                            inp_tr['si'][i:i+FLAGS.batch_size],
                            inp_tr['qi_char'][i:i+FLAGS.batch_size],
@@ -261,13 +260,14 @@ if __name__ == "__main__":
                            inp_tr['s_l'][i:i+FLAGS.batch_size],
                            y_train[i:i+FLAGS.batch_size]
             ]
-            if FLAGS.dataset == "SemEval":
+            if FLAGS.dataset == "SemEval" or FLAGS.dataset == "TrecQA":
                 loss = train_step(sess, model, data_batch)
             else:
                 loss = SNLI_train_step(sess, model, data_batch)
-            t.set_description("epoch %d: train loss %.6f" % (e, loss))
+            train_loss.append(loss)
+            t.set_description("epoch %d: train loss %.6f" % (e, np.mean(train_loss)))
             t.refresh()
-        if FLAGS.dataset == "SemEval" or FLAGS.datasets == "TrecQA":
+        if FLAGS.dataset == "SemEval" or FLAGS.dataset == "TrecQA":
             curr_map = SemEval_test_step(sess, model, test_data, callback)
         elif FLAGS.dataset == "QNLI":
             curr_map = SNLI_test_step(sess, model, test_data)
