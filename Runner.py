@@ -5,6 +5,7 @@ import datetime
 from Match_LSTM import MatchLSTM
 from Rnet import Rnet
 from ESIM_model import ESIM
+from seq_match_seq import SeqMatchSeq
 import json
 import os
 import DataUtils
@@ -34,7 +35,7 @@ tf.flags.DEFINE_string("bidi_mode", "concatenate", "")
 tf.flags.DEFINE_boolean("use_cudnn", True, "")
 # word vector config
 tf.flags.DEFINE_string(
-    "embedding_path", "glove.6B.300d.txt", "word embedding path")
+    "embedding_path", "glove.6B.50d.txt", "word embedding path")
 tf.flags.DEFINE_boolean("use_char_embedding", True, "")
 tf.flags.DEFINE_integer("char_embedding_dim", 50, "")
 tf.flags.DEFINE_integer("char_pad", 15, "")
@@ -205,7 +206,7 @@ def SemEval_test_step(sess, model, test_data, call_back, debug=False):
 
 
 if __name__ == "__main__":
-    trainf = os.path.join(FLAGS.dataset, 'train.txt')
+    trainf = os.path.join(FLAGS.dataset, 'test.txt')
     valf = os.path.join(FLAGS.dataset, 'test.txt')
     testf = os.path.join(FLAGS.dataset, 'dev.txt')
     best_map = 0
@@ -221,7 +222,7 @@ if __name__ == "__main__":
         allow_soft_placement=FLAGS.allow_soft_placement,
         log_device_placement=FLAGS.log_device_placement)
     sess = tf.Session(config=session_conf) 
-    model = MatchLSTM(FLAGS, vocab, char_vocab, emb)
+    model = SeqMatchSeq(FLAGS, vocab, char_vocab, emb)
     checkpoint_dir = os.path.abspath(os.path.join(FLAGS.out_dir, "checkpoints"))
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
