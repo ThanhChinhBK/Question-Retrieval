@@ -438,7 +438,7 @@ def map_(s0, y, ypred, debug=False):
                 precisions.append(num_correct / (i + 1))
         if len(precisions):
             avg_prec = sum(precisions) / len(precisions)
-            MAP.append(avg_prec)
+        MAP.append(avg_prec)
     if debug:
         return MAP
     else:
@@ -488,8 +488,6 @@ class AnsSelCB():
             fw.write("\n")
             fw.write("*"*50+'\n')
             if _map > thresold and _map != 0:
-                count += 1
-                print(count)
                 fw.write("%.6f\t%s\n" %(_map, q_uniq[i]))
                 for j in range(10):
                     ind = i * 10 + j

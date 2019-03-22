@@ -37,8 +37,10 @@ class Encoder(object):
         with tf.variable_scope("encoded_question"):
             bw_lstm_cell_question = tf.contrib.rnn.BasicLSTMCell(
                 self.hidden_size, state_is_tuple=True)
+            
             fw_lstm_cell_question = tf.contrib.rnn.BasicLSTMCell(
                 self.hidden_size, state_is_tuple=True)
+            
             # encoded_question, (q_rep, _) = tf.nn.dynamic_rnn(
             # lstm_cell_question, question, masks_question, dtype=tf.float32)
             # # (-1, Q, H)
@@ -88,8 +90,8 @@ class Decoder(object):
         masks_question, masks_hypothesis = masks
         masks_hypothesis = tf.reduce_sum(masks_hypothesis, -1)
         #masks_question = tf.reduce_sum(masks_question, -1)
-        match_lstm_cell_attention_fn = lambda curr_input, state: tf.concat(
-            [curr_input, state], axis=-1)
+        # match_lstm_cell_attention_fn = lambda curr_input, state: tf.concat(
+        #     [curr_input, state], axis=-1)
 
         query_depth = encoded_question.get_shape().as_list()[-1]
 
@@ -123,13 +125,14 @@ class Decoder(object):
             #     sequence_length=masks_hypothesis,
             #     dtype=tf.float32
             # )
-            # cell_fw = MatchLSTMAttnCell(self.hidden_size, encoded_question, masks_question)
-            # cell_bw = MatchLSTMAttnCell(self.hidden_size, encoded_question, masks_question)
-            # (output_attender_fw, output_attender_bw), _ = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw,
-            #                                                                               inputs=encoded_hypothesis,
-            #                                                                               sequence_length=masks_hypothesis,
-            #                                                                               dtype=tf.float32)
-            
+        # cell_fw = MatchLSTMAttnCell(self.hidden_size, encoded_question, masks_question)
+        # cell_bw = MatchLSTMAttnCell(self.hidden_size, encoded_question, masks_question)
+        # (output_attender_fw, output_attender_bw), (state_attender_fw, state_attender_bw) = tf.nn.bidirectional_dynamic_rnn(
+        #     cell_fw, cell_bw,
+        #     inputs=encoded_hypothesis,
+        #     sequence_length=masks_hypothesis,
+        #     dtype=tf.float32)
+        
         output_attender = tf.concat(
             [output_attender_fw, output_attender_bw], -1)
         state_attender = tf.concat(
@@ -229,11 +232,11 @@ class Decoder(object):
 
         output_attender, state_attender = self.run_match_lstm(encoded_rep, masks, False)
         #output_cnn = cnnsum(output_attender, self.dropout)
-        #output_maxpool = tf.reduce_max(output_attender, 1)
-        #output_meanpool = tf.reduce_mean(output_attender, 1)
-        #outputs = tf.concat([output_maxpool, output_meanpool], -1)
-        #ourputs = tf.nn.dropout(outputs, self.dropout)
-        logits = self.run_projection(state_attender, 1, "SemEval_projection")
+        output_maxpool = tf.reduce_max(output_attender, 1)
+        output_meanpool = tf.reduce_mean(output_attender, 1)
+        outputs = tf.concat([output_maxpool, output_meanpool], -1)
+        ourputs = tf.nn.dropout(outputs, self.dropout)
+        logits = self.run_projection(outputs, 1, "SemEval_projection")
         logits_SNLI = self.run_projection(state_attender, 3, "SNLI_projection")
         logits_SQUAD = self.run_answer_ptr(
             output_attender, masks, "SQUAD_ans_ptr")
@@ -280,7 +283,7 @@ class MatchLSTM(object):
             self.y = tf.placeholder(
                 tf.float32, [None], "labels")
             self.y_SNLI = tf.placeholder(
-                tf.float32, [None, 3], "labels_SNLI")
+                tf.int32, [None], "labels_SNLI")
             self.y_SQUAD = tf.placeholder(
                 tf.int32, [None, 2], "labels_SNLI")
             self.dropout = tf.placeholder(
@@ -383,7 +386,7 @@ class MatchLSTM(object):
             lossL2_SQUAD = tf.add_n([tf.nn.l2_loss(v)
                                      for v in vars_SQUAD]) * 1e-4
             self.loss = self.loss + lossL2_SemEval
-            self.loss_SNLI = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(
+            self.loss_SNLI = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
                 labels=self.y_SNLI,
                 logits=logits_SNLI
             ))

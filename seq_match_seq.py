@@ -164,7 +164,7 @@ class SeqMatchSeq(object):
             self.y = tf.placeholder(
                 tf.float32, [None], "labels")
             self.y_SNLI = tf.placeholder(
-                tf.float32, [None, 3], "labels_SNLI")
+                tf.int32, [None], "labels_SNLI")
             self.y_SQUAD = tf.placeholder(
                 tf.int32, [None, 2], "labels_SNLI")
             self.dropout = tf.placeholder(
@@ -231,8 +231,8 @@ class SeqMatchSeq(object):
         with tf.variable_scope("premise_encoding"):
             # Create premise encoder with dropout
             premise_encoder = tf.contrib.rnn.DropoutWrapper(cell(self.config.hidden_layer),
-                                                            input_keep_prob=1 - self.dropout,
-                                                            output_keep_prob=1 - self.dropout)
+                                                            input_keep_prob=self.dropout,
+                                                            output_keep_prob=self.dropout)
             # Encode premise
             # Shape: [batch_size, max_time, rnn_size]
             premise_mem,_ = tf.nn.dynamic_rnn(premise_encoder,
@@ -242,8 +242,8 @@ class SeqMatchSeq(object):
         with tf.variable_scope("hypothesis_encoding"):
             # Create hypothesis encoder with dropout
             hypothesis_encoder = tf.contrib.rnn.DropoutWrapper(cell(self.config.hidden_layer),
-                                                               input_keep_prob=1 - self.dropout,
-                                                               output_keep_prob=1 - self.dropout)
+                                                               input_keep_prob=self.dropout,
+                                                               output_keep_prob=self.dropout)
             # Encode hypothesis
             # Shape: [batch_size, max_time, rnn_size]
             hypothesis_mem,_ = tf.nn.dynamic_rnn(hypothesis_encoder,
@@ -270,17 +270,20 @@ class SeqMatchSeq(object):
                                      tf.reduce_sum(self.hypothesis_length, -1),
                                      dtype=tf.float32)
         hidden_state = get_hidden_state(state.cell_state)
+        #hidden_state = tf.concat([tf.reduce_max(premise_mem, -1),
+        #                          tf.reduce_max(hypothesis_mem, -1)], -1)
         # Fully connection Layer
         fcn = layers_core.Dense(3, name='fcn')
         # logits
         logits = fcn(hidden_state)
         
         # predicted_ids_with_logits
-        self.yp_SNLI = tf.nn.top_k(logits)
+        self.yp_SNLI = tf.argmax(logits, -1)
         # Losses
-        losses = tf.nn.softmax_cross_entropy_with_logits(labels=self.y_SNLI, logits=logits)
+        losses = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.y_SNLI, logits=logits)
         # Total loss
         self.loss_SNLI = tf.reduce_mean(losses)
+        self.yp_SNLI = tf.argmax(logits, -1)
         # Get all trainable variables
         parameters = tf.trainable_variables()
         # Calculate gradients
@@ -289,7 +292,7 @@ class SeqMatchSeq(object):
         clipped_gradients, _ = tf.clip_by_global_norm(gradients, self.config.grad_clip)
         # Optimization
         #optimizer = tf.train.GradientDescentOptimizer(self.init_learning_rate)
-        SNLI_op = tf.train.AdamOptimizer(self.config.learning_rate)
+        SNLI_op = tf.train.AdadeltaOptimizer(self.config.learning_rate)
         # Update operator
         self.global_step = tf.get_variable('global_step',shape=[],initializer=tf.constant_initializer(0,dtype=tf.int32),trainable=False)
         self.train_op_SNLI = SNLI_op.apply_gradients(zip(clipped_gradients, parameters),global_step=self.global_step)

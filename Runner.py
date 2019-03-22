@@ -25,9 +25,9 @@ tf.flags.DEFINE_float("learning_rate", 1e-4, "learning rate")
 tf.flags.DEFINE_float("grad_clip", 5.0, "")
 # LSTM config
 tf.flags.DEFINE_integer("hidden_layer", 300, "")
-tf.flags.DEFINE_integer("pad_question", 50, "")
-tf.flags.DEFINE_integer("pad_sentence", 50, "")
-tf.flags.DEFINE_float("dropout", 0.3, "")
+tf.flags.DEFINE_integer("pad_question", 100, "")
+tf.flags.DEFINE_integer("pad_sentence", 150, "")
+tf.flags.DEFINE_float("dropout", 0.7, "")
 tf.flags.DEFINE_string("Ddim", "2", "")
 tf.flags.DEFINE_boolean("bidi", True, "")
 tf.flags.DEFINE_string("rnnact", "tanh", "")
@@ -35,7 +35,7 @@ tf.flags.DEFINE_string("bidi_mode", "concatenate", "")
 tf.flags.DEFINE_boolean("use_cudnn", True, "")
 # word vector config
 tf.flags.DEFINE_string(
-    "embedding_path", "glove.6B.50d.txt", "word embedding path")
+    "embedding_path", "glove.6B.300d.txt", "word embedding path")
 tf.flags.DEFINE_boolean("use_char_embedding", True, "")
 tf.flags.DEFINE_integer("char_embedding_dim", 50, "")
 tf.flags.DEFINE_integer("char_pad", 15, "")
@@ -117,6 +117,17 @@ def load_data(trainf, valf, testf):
         char_vocab = pickle.load(open("char_vocab.pkl", "rb"))
         inp_tr, y_train = load_set(trainf, vocab, char_vocab, iseval=True)
     inp_val, y_val = load_set(valf, vocab, char_vocab, iseval=True)
+    print("=" * 50)
+    print("Sample in training data")
+    print("q:",  inp_tr["q"][2])
+    print("qi:", list(inp_tr["qi"][2]))
+    print("sents:", inp_tr["sents"][2])
+    print("si:", list(inp_tr["si"][2]))
+    print("target:", inp_tr["y"][2])
+    print("=" * 50)
+    print("Train on {} pairs of sentece".format(len(inp_tr["q"])))
+    print("Valid on {} pairs of sentece".format(len(inp_val["q"])))
+    print("=" * 50)
     #inp_test, y_test = load_set(testf, vocab=vocab, iseval=True)
 
 
@@ -131,7 +142,7 @@ def SNLI_train_step(sess, model, data_batch):
         model.hypothesis_char : s_char_batch,
         #model.hypothesis_length : sl_batch,
         model.dropout : FLAGS.dropout,
-        model.y_SNLI : y_batch_onehot
+        model.y_SNLI : y_batch
     }
     _, loss = sess.run([model.train_op_SNLI, model.loss_SNLI], feed_dict=feed_dict)
     return loss
@@ -165,7 +176,7 @@ def SNLI_test_step(sess, model, test_data):
             model.hypothesis : s_test[i:i+FLAGS.batch_size],
             model.hypothesis_char : s_char_batch[i:i+FLAGS.batch_size],
             #model.hypothesis_length : sl_test[i:i+FLAGS.batch_size],
-            model.y_SNLI : y_test_onehot,
+            model.y_SNLI : y_test[i:i+FLAGS.batch_size],
             model.dropout : 1.0
         }
         loss, pred_label = sess.run([model.loss_SNLI, model.yp_SNLI], feed_dict=feed_dict)
@@ -206,7 +217,7 @@ def SemEval_test_step(sess, model, test_data, call_back, debug=False):
 
 
 if __name__ == "__main__":
-    trainf = os.path.join(FLAGS.dataset, 'test.txt')
+    trainf = os.path.join(FLAGS.dataset, 'train.txt')
     valf = os.path.join(FLAGS.dataset, 'test.txt')
     testf = os.path.join(FLAGS.dataset, 'dev.txt')
     best_map = 0
@@ -222,7 +233,7 @@ if __name__ == "__main__":
         allow_soft_placement=FLAGS.allow_soft_placement,
         log_device_placement=FLAGS.log_device_placement)
     sess = tf.Session(config=session_conf) 
-    model = SeqMatchSeq(FLAGS, vocab, char_vocab, emb)
+    model = MatchLSTM(FLAGS, vocab, char_vocab, emb)
     checkpoint_dir = os.path.abspath(os.path.join(FLAGS.out_dir, "checkpoints"))
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
@@ -251,8 +262,9 @@ if __name__ == "__main__":
         best_map=SemEval_test_step(sess, model, test_data, callback, debug=True)
     for e in range(FLAGS.epochs):
         t = tqdm(range(0, len(y_train), FLAGS.batch_size), desc='train loss: %.6f' %0.0, ncols=100)
+        train_loss = []
         for i in t:
-            train_loss = []
+
             data_batch = [ inp_tr['qi'][i:i+FLAGS.batch_size],
                            inp_tr['si'][i:i+FLAGS.batch_size],
                            inp_tr['qi_char'][i:i+FLAGS.batch_size],
