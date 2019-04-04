@@ -10,8 +10,9 @@ import json
 import os
 import DataUtils
 from nltk.tokenize import word_tokenize
-import spacy
-enNLP = spacy.load("en")
+import json
+#import spacy
+#enNLP = spacy.load("en")
 from tqdm import *
 from sklearn.metrics import accuracy_score
 
@@ -65,9 +66,9 @@ def load_data_from_file(dsfile):
             #q_tok = [w.string.strip() for w in enNLP(qtext.lower())]
             #s_tok = [w.string.strip() for w in enNLP(stext.lower())]
         
-            q.append(q_tok)
+            q.append(q_tok+["<eos>"])
             q_l.append(min(len(q_tok), FLAGS.pad_question))
-            sents.append(s_tok)
+            sents.append(s_tok+["<eos>"])
             s_l.append(min(len(s_tok), FLAGS.pad_sentence))
             labels.append(int(label))
     return (q, sents,q_l, s_l,  labels)
@@ -225,6 +226,8 @@ if __name__ == "__main__":
     print("Load data")
     load_data(trainf, valf, testf)
     pickle.dump(vocab, open("vocab.pkl","wb"))
+    pickle.dump(char_vocab, open("char_vocab.pkl","wb"))
+    json.dump(tf.app.flags.FLAGS.flag_values_dict(), open("config.json", "w"), indent=4)
     print("Load Glove")
     emb = DataUtils.GloVe(FLAGS.embedding_path)
     gpu_options = tf.GPUOptions(allow_growth=True)

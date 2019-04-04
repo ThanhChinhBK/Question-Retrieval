@@ -133,10 +133,13 @@ class Decoder(object):
         #     sequence_length=masks_hypothesis,
         #     dtype=tf.float32)
         
+        attention_fw = output_attender_fw[:, :, self.hidden_size:]
+        attention_bw = output_attender_bw[:, :, self.hidden_size:]
         output_attender = tf.concat(
-            [output_attender_fw, output_attender_bw], -1)
+            [output_attender_fw[:, :, :self.hidden_size], output_attender_bw[:, :, :self.hidden_size]], -1)
         state_attender = tf.concat(
-            [state_attender_fw[0].h, state_attender_bw[0].h], axis=-1)  # (-1, 2*H)
+            [state_attender_fw[0].h[:, :self.hidden_size], state_attender_bw[0].h[:, :self.hidden_size]], axis=-1)  # (-1, 2*H)
+        utput_attender = tf.tanh(tf.layers.batch_normalization(output_attender))
         output_attender = tf.tanh(
             tf.layers.batch_normalization(output_attender))
         state_attender = tf.tanh(
@@ -163,7 +166,7 @@ class Decoder(object):
         # output_attender = tf.concat(
         #         [output_attender_fw, output_attender_bw], -1)
         # output_attender = tf.nn.dropout(output_attender, self.dropout)
-        return output_attender, state_attender
+        return output_attender, state_attender, (attention_fw, attention_bw)
 
     def run_answer_ptr(self, output_attender, masks, scope="ans_ptr"):
         with tf.variable_scope(scope):
@@ -230,17 +233,17 @@ class Decoder(object):
         :return: logits: for each word in hypothesis the probability that it is the start word and end word.
         """
 
-        output_attender, state_attender = self.run_match_lstm(encoded_rep, masks, False)
+        self.output_attender, state_attender, attention = self.run_match_lstm(encoded_rep, masks, False)
         #output_cnn = cnnsum(output_attender, self.dropout)
-        output_maxpool = tf.reduce_max(output_attender, 1)
-        output_meanpool = tf.reduce_mean(output_attender, 1)
+        output_maxpool = tf.reduce_max(self.output_attender, 1)
+        output_meanpool = tf.reduce_mean(self.output_attender, 1)
         outputs = tf.concat([output_maxpool, output_meanpool], -1)
         ourputs = tf.nn.dropout(outputs, self.dropout)
         logits = self.run_projection(outputs, 1, "SemEval_projection")
         logits_SNLI = self.run_projection(state_attender, 3, "SNLI_projection")
         logits_SQUAD = self.run_answer_ptr(
-            output_attender, masks, "SQUAD_ans_ptr")
-        return logits, logits_SNLI, logits_SQUAD
+            self.output_attender, masks, "SQUAD_ans_ptr")
+        return logits, logits_SNLI, logits_SQUAD, attention
 
 
 
@@ -256,7 +259,7 @@ class MatchLSTM(object):
         
         self._add_embedding()
         self.encoder = Encoder(self.config.hidden_layer, self.dropout)
-        self.decoder = Decoder(self.config.hidden_layer ,
+        self.decoder = Decoder(self.config.hidden_layer*2 ,
                                self.Ddim, self.dropout)
         self._build_model()
         self.train_op = tf.train.AdamOptimizer(
@@ -338,7 +341,7 @@ class MatchLSTM(object):
             
         self.queries_embedding = tf.concat([self.queries_embedding, cq_emb], axis=2)
         self.hypothesis_embedding = tf.concat([self.hypothesis_embedding, ch_emb], axis=2)
-        self.config.hidden_layer += self.config.char_embedding_dim * 2
+        #self.config.hidden_layer += self.config.char_embedding_dim * 2
         if self.config.dropout < 1:
             self.queries_embedding = tf.nn.dropout(
                 self.queries_embedding, self.dropout)
@@ -346,14 +349,15 @@ class MatchLSTM(object):
                 self.hypothesis_embedding, self.dropout)
             
     def _build_model(self):
-        encoded_queries, encoded_hypothesis, q_rep, h_rep = self.encoder.encode(
+        self.encoded_queries, self.encoded_hypothesis, self.q_rep, self.h_rep = self.encoder.encode(
             [self.queries_embedding, self.hypothesis_embedding],
             [self.queries_length, self.hypothesis_length],
             encoder_state_input=None
         )
-        logits, logits_SNLI, logits_SQUAD = self.decoder.decode([encoded_queries, encoded_hypothesis],
-                                                                q_rep,
+        logits, logits_SNLI, logits_SQUAD, attention = self.decoder.decode([self.encoded_queries, self.encoded_hypothesis],
+                                                                self.q_rep,
                                                                 [self.queries_length, self.hypothesis_length])
+        self.attention_fw, self.attention_bw = attention
         self.yp = tf.nn.sigmoid(logits)
         self.yp_SNLI = tf.argmax(logits_SNLI, -1)
         with tf.variable_scope("loss"):

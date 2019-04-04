@@ -131,15 +131,15 @@ class SeqMatchSeqAttention(object):
             # Shape: [batch_size, max_premise_len]
             score = tf.reduce_sum(v * tf.tanh(self._keys + processed_hypothesis_mem + processed_query), [2])
             # Mask score with -inf
-            score_mask_values = float("-inf") * (1.-tf.cast(self._premise_mem_weights, tf.float32))
-            masked_score = tf.where(tf.cast(self._premise_mem_weights, tf.bool), score, score_mask_values)
+            #score_mask_values = float("-inf") * (1.-tf.cast(self._premise_mem_weights, tf.float32))
+            #masked_score = tf.where(tf.cast(self._premise_mem_weights, tf.bool), score, score_mask_values)
             # Calculate alignments
             # Shape: [batch_size, max_premise_len]
-            alignments = tf.nn.softmax(masked_score)
+            alignments = tf.nn.softmax(score)
             # Calculate attention
             # Shape: [batch_size, rnn_size]
             attention = tf.reduce_sum(tf.expand_dims(alignments, 2) * self._premise_mem, axis=1)
-            return attention
+            return attention, alignments
         
         
 class SeqMatchSeqWrapper(rnn_cell_impl.RNNCell):
@@ -159,31 +159,42 @@ class SeqMatchSeqWrapper(rnn_cell_impl.RNNCell):
         # Concatenate attention and input
         cell_inputs = tf.concat([state.attention, inputs], axis=-1)
         cell_state = state.cell_state
+        cell_state = tf.nn.rnn_cell.LSTMStateTuple(c=cell_state.c,
+                                                   h=cell_state.h[:, :-self._attention_mechanism.alignments_size])
         # Call cell function
+        
         cell_output, next_cell_state = self._cell(cell_inputs, cell_state)
         # Get hidden state
         hidden_state = get_hidden_state(cell_state)
         # Calculate attention
-        attention = self._attention_mechanism(inputs, hidden_state)
+        attention, alignments = self._attention_mechanism(inputs, hidden_state)
         # Assemble next state
+        
+        next_cell_state = tf.nn.rnn_cell.LSTMStateTuple(c=next_cell_state.c,
+                                                        h=tf.concat((next_cell_state.h, alignments), -1))
         next_state = SeqMatchSeqAttentionState(
             cell_state=next_cell_state,
             attention=attention)
-        return cell_output, next_state
+        return tf.concat([cell_output, alignments],-1), next_state
     
     @property
     def state_size(self):
+        state_size = self._cell.state_size
+        state_size = (state_size[0], self._attention_mechanism.alignments_size + state_size[1])
         return SeqMatchSeqAttentionState(
-            cell_state=self._cell.state_size,
+            cell_state=state_size,
             attention=self._attention_mechanism._premise_mem.get_shape()[-1].value
         )
     
     @property
     def output_size(self):
-        return self._cell.output_size
+        return self._cell.output_size + self._attention_mechanism.alignments_size
     
     def zero_state(self, batch_size, dtype):
         cell_state = self._cell.zero_state(batch_size, dtype)
+        cell_state = tf.nn.rnn_cell.LSTMStateTuple(c=cell_state.c,
+                                                   h=tf.concat([cell_state.h,
+                                                                rnn_cell_impl._zero_state_tensors(self._attention_mechanism.alignments_size, batch_size, tf.float32)],-1))
         attention = rnn_cell_impl._zero_state_tensors(self.state_size.attention, batch_size, tf.float32)
         return SeqMatchSeqAttentionState(
             cell_state=cell_state,
