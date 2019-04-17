@@ -212,12 +212,13 @@ class Decoder(object):
                                     shape=[self.hidden_size * ddim],
                                     name='b_{}'.format(n))
                 input_projection = tf.matmul(input_projection, w) + b
+                input_projection = tf.nn.dropout(input_projection, self.dropout)
 
             _, curr_dim = input_projection.get_shape()
             output_projection = tf.layers.dense(input_projection,
                                                 output_dim,
                                                 name="projection_final")
-            output_projection = tf.nn.dropout(output_projection, self.dropout)
+            
         return output_projection
 
     def decode(self, encoded_rep, q_rep, masks):
@@ -238,9 +239,9 @@ class Decoder(object):
         output_maxpool = tf.reduce_max(self.output_attender, 1)
         output_meanpool = tf.reduce_mean(self.output_attender, 1)
         outputs = tf.concat([output_maxpool, output_meanpool], -1)
-        ourputs = tf.nn.dropout(outputs, self.dropout)
+        #ourputs = tf.nn.dropout(outputs, self.dropout)
         logits = self.run_projection(outputs, 1, "SemEval_projection")
-        logits_SNLI = self.run_projection(state_attender, 3, "SNLI_projection")
+        logits_SNLI = self.run_projection(outputs, 3, "SNLI_projection")
         logits_SQUAD = self.run_answer_ptr(
             self.output_attender, masks, "SQUAD_ans_ptr")
         return logits, logits_SNLI, logits_SQUAD, attention
