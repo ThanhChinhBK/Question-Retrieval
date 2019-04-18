@@ -63,9 +63,7 @@ def cnnsum(inputs, dropout, cnnact=tf.nn.relu,
                                               name=pfx + 'pool%d' % (fl))
 
         si_out_one = tf.contrib.layers.flatten(si_pool_one)
-
         si_cnn_res_list.append(si_out_one)
-
         tot_len += nb_filter
 
     si_cnn = tf.nn.dropout(tf.concat(si_cnn_res_list, -1), dropout)
@@ -295,3 +293,19 @@ def custom_dynamic_rnn(cell, inputs, inputs_len, initial_state=None):
 
     outputs = tf.transpose(emit_ta.stack(), [1, 0, 2])
     return outputs, state
+
+def self_attentive_encode(hypothesis_length, hidden, dropout, attn_unit, hop):
+    batch_size, max_len, hidden_dim = hidden.get_shape().as_list()
+    hidden_compressed = tf.reshape(hidden, [-1, hidden_dim]) # [batch_size * max_len, hidden_dim]
+    attn_mask = tf.expand_dims(hypothesis_length, 1)  #[batch_size,1 , max_len]
+    attn_mask = tf.tile(attn_mask, [1,hop, 1]) # [batch_size, hop, 1]
+    ws1 = layers_core.Dense(attn_unit, name="ws1", use_bias=False)
+    ws2 = layers_core.Dense(hop, name="ws2", use_bias=False)
+    hbar = tf.tanh(ws1(hidden_compressed)) # [batch_size*max_len, attn_unit]
+    hbar = tf.nn.dropout(hbar, dropout)
+    alphas = tf.transpose(tf.reshape(ws2(hbar), [-1, max_len, hop]),
+                          [0,2,1]) #[batch_size, hop, max_len]
+    alphas_penalized = float("-inf") * (1. - tf.cast(attn_mask, tf.float32))
+    alphas_penalized = tf.where(tf.cast(attn_mask, tf.bool), alphas, alphas_penalized)
+    alphas = tf.nn.softmax(alphas) #[batch_size, hop, max_len]
+    return tf.matmul(alphas, hidden), alphas #[batch_size, hop, hidden_dim]

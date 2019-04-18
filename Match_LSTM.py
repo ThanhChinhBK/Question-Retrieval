@@ -79,11 +79,13 @@ class Encoder(object):
 
 class Decoder(object):
 
-    def __init__(self, hidden_size, Ddim, dropout, initializer=lambda: None):
+    def __init__(self, hidden_size, Ddim, dropout, attn_unit, hop, initializer=lambda: None):
         self.hidden_size = hidden_size
         self.init_weights = initializer
         self.Ddim = Ddim
         self.dropout = dropout
+        self.attn_unit = attn_unit
+        self.hop = hop
 
     def run_match_lstm(self, encoded_rep, masks, return_sequence=False):
         encoded_question, encoded_hypothesis = encoded_rep
@@ -100,11 +102,11 @@ class Decoder(object):
         with tf.variable_scope("match_lstm_attender"):
             attention_mechanism_fw = SeqMatchSeqAttention(
                 query_depth, encoded_question, masks_question)
-            mLSTM_fw_cell = SeqMatchSeqWrapper(tf.contrib.rnn.BasicLSTMCell(self.hidden_size, state_is_tuple=True),
+            mLSTM_fw_cell = SeqMatchSeqWrapper(tf.contrib.rnn.LSTMCell(self.hidden_size, state_is_tuple=True),
                                                attention_mechanism_fw)
             attention_mechanism_bw = SeqMatchSeqAttention(
                 query_depth, encoded_question, masks_question)
-            mLSTM_bw_cell = SeqMatchSeqWrapper(tf.contrib.rnn.BasicLSTMCell(self.hidden_size, state_is_tuple=True),
+            mLSTM_bw_cell = SeqMatchSeqWrapper(tf.contrib.rnn.LSTMCell(self.hidden_size, state_is_tuple=True),
                                                attention_mechanism_bw)
             (output_attender_fw, output_attender_bw), (state_attender_fw, state_attender_bw) = tf.nn.bidirectional_dynamic_rnn(
                 mLSTM_fw_cell,
@@ -139,9 +141,7 @@ class Decoder(object):
             [output_attender_fw[:, :, :self.hidden_size], output_attender_bw[:, :, :self.hidden_size]], -1)
         state_attender = tf.concat(
             [state_attender_fw[0].h[:, :self.hidden_size], state_attender_bw[0].h[:, :self.hidden_size]], axis=-1)  # (-1, 2*H)
-        utput_attender = tf.tanh(tf.layers.batch_normalization(output_attender))
-        output_attender = tf.tanh(
-            tf.layers.batch_normalization(output_attender))
+        output_attender = tf.tanh(tf.layers.batch_normalization(output_attender))
         state_attender = tf.tanh(
             tf.layers.batch_normalization(state_attender))
         # self_attention_inputs = output_attender
@@ -236,10 +236,12 @@ class Decoder(object):
 
         self.output_attender, state_attender, attention = self.run_match_lstm(encoded_rep, masks, False)
         #output_cnn = cnnsum(output_attender, self.dropout)
-        output_maxpool = tf.reduce_max(self.output_attender, 1)
-        output_meanpool = tf.reduce_mean(self.output_attender, 1)
-        outputs = tf.concat([output_maxpool, output_meanpool], -1)
-        #ourputs = tf.nn.dropout(outputs, self.dropout)
+        #output_maxpool = tf.reduce_max(self.output_attender, 1)
+        #output_meanpool = tf.reduce_mean(self.output_attender, 1)
+        #outputs = tf.concat([output_maxpool, output_meanpool], -1)
+        _, masks_hypothesis = masks
+        outputs, _ = self_attentive_encode(masks_hypothesis, self.output_attender, self.dropout, self.attn_unit, self.hop)
+        outputs = tf.reshape(outputs, [-1, self.hop * self.hidden_size*2])
         logits = self.run_projection(outputs, 1, "SemEval_projection")
         logits_SNLI = self.run_projection(outputs, 3, "SNLI_projection")
         logits_SQUAD = self.run_answer_ptr(
@@ -261,7 +263,7 @@ class MatchLSTM(object):
         self._add_embedding()
         self.encoder = Encoder(self.config.hidden_layer, self.dropout)
         self.decoder = Decoder(self.config.hidden_layer*2 ,
-                               self.Ddim, self.dropout)
+                               self.Ddim, self.dropout, self.config.attn_unit, self.config.hop)
         self._build_model()
         self.train_op = tf.train.AdamOptimizer(
             learning_rate=self.config.learning_rate).minimize(self.loss)

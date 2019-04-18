@@ -34,9 +34,12 @@ tf.flags.DEFINE_boolean("bidi", True, "")
 tf.flags.DEFINE_string("rnnact", "tanh", "")
 tf.flags.DEFINE_string("bidi_mode", "concatenate", "")
 tf.flags.DEFINE_boolean("use_cudnn", True, "")
+#self attention config
+tf.flags.DEFINE_integer("attn_unit", 350, "")
+tf.flags.DEFINE_integer("hop", 1, "")
 # word vector config
 tf.flags.DEFINE_string(
-    "embedding_path", "glove.6B.300d.txt", "word embedding path")
+    "embedding_path", "glove.6B.50d.txt", "word embedding path")
 tf.flags.DEFINE_boolean("use_char_embedding", True, "")
 tf.flags.DEFINE_integer("char_embedding_dim", 50, "")
 tf.flags.DEFINE_integer("char_pad", 15, "")
@@ -218,7 +221,7 @@ def SemEval_test_step(sess, model, test_data, call_back, debug=False):
 
 
 if __name__ == "__main__":
-    trainf = os.path.join(FLAGS.dataset, 'train.txt')
+    trainf = os.path.join(FLAGS.dataset, 'test.txt')
     valf = os.path.join(FLAGS.dataset, 'test.txt')
     testf = os.path.join(FLAGS.dataset, 'dev.txt')
     best_map = 0
