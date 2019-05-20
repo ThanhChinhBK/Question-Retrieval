@@ -236,12 +236,12 @@ class Decoder(object):
 
         self.output_attender, state_attender, attention = self.run_match_lstm(encoded_rep, masks, False)
         #output_cnn = cnnsum(output_attender, self.dropout)
-        #output_maxpool = tf.reduce_max(self.output_attender, 1)
-        #output_meanpool = tf.reduce_mean(self.output_attender, 1)
-        #outputs = tf.concat([output_maxpool, output_meanpool], -1)
-        _, masks_hypothesis = masks
-        outputs, _ = self_attentive_encode(masks_hypothesis, self.output_attender, self.dropout, self.attn_unit, self.hop)
-        outputs = tf.reshape(outputs, [-1, self.hop * self.hidden_size*2])
+        output_maxpool = tf.reduce_max(self.output_attender, 1)
+        output_meanpool = tf.reduce_mean(self.output_attender, 1)
+        outputs = tf.concat([output_maxpool, output_meanpool], -1)
+        #_, masks_hypothesis = masks
+        #outputs, _ = self_attentive_encode(masks_hypothesis, self.output_attender, self.dropout, self.attn_unit, self.hop)
+        #outputs = tf.reshape(outputs, [-1, self.hop * self.hidden_size*2])
         logits = self.run_projection(outputs, 1, "SemEval_projection")
         logits_SNLI = self.run_projection(outputs, 3, "SNLI_projection")
         logits_SQUAD = self.run_answer_ptr(

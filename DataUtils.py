@@ -404,25 +404,16 @@ def mrr(s0, y, ypred):
     e.g. for the "answer sentence selection" task where we want to
     identify and take top N most relevant sentences.
     """
-    rr = []
+    n = 0
+    mrr = 0
     for s, ys in aggregate_s0(s0, y, ypred):
-        if np.sum([yy[0] for yy in ys]) == 0:
-            continue  # do not include s0 with no right answers in MRR
-        ysd = dict()
-        for yy in ys:
-            if yy[1][0] in ysd:
-                ysd[yy[1][0]].append(yy[0])
-            else:
-                ysd[yy[1][0]] = [yy[0]]
-        rank = 0
-        for yp in sorted(ysd.keys(), reverse=True):
-            if np.sum(ysd[yp]) > 0:
-                rankofs = 1 - np.sum(ysd[yp]) / len(ysd[yp])
-                rank += len(ysd[yp]) * rankofs
+        n += 1
+        candidates = ys
+        for i in range(len(candidates)):
+            if candidates[i][0] == 1:
+                mrr += 1.0 / (i + 1)
                 break
-            rank += len(ysd[yp])
-        rr.append(1 / float(1 + rank))
-    return np.mean(rr)
+    return mrr * 100.0 / n
 
 
 def map_(s0, y, ypred, debug=False):

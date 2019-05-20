@@ -39,7 +39,7 @@ tf.flags.DEFINE_integer("attn_unit", 350, "")
 tf.flags.DEFINE_integer("hop", 1, "")
 # word vector config
 tf.flags.DEFINE_string(
-    "embedding_path", "glove.6B.50d.txt", "word embedding path")
+    "embedding_path", "glove.6B.300d.txt", "word embedding path")
 tf.flags.DEFINE_boolean("use_char_embedding", True, "")
 tf.flags.DEFINE_integer("char_embedding_dim", 50, "")
 tf.flags.DEFINE_integer("char_pad", 15, "")
@@ -217,14 +217,15 @@ def SemEval_test_step(sess, model, test_data, call_back, debug=False):
         callback.on_debug(final_pred)        
     logs = call_back.on_epoch_end(final_pred)
     #print("In dev set: loss: {} MMR: {} MAP: {}".format(loss, logs['mrr'], logs['map']))
-    return logs['map']
+    return logs['map'], logs['mrr']
 
 
 if __name__ == "__main__":
-    trainf = os.path.join(FLAGS.dataset, 'test.txt')
+    trainf = os.path.join(FLAGS.dataset, 'train.txt')
     valf = os.path.join(FLAGS.dataset, 'test.txt')
     testf = os.path.join(FLAGS.dataset, 'dev.txt')
     best_map = 0
+    mrr_on_best_map = 0
     best_epoch = 0
     print("Load data")
     load_data(trainf, valf, testf)
@@ -287,11 +288,13 @@ if __name__ == "__main__":
             t.set_description("epoch %d: train loss %.6f" % (e, np.mean(train_loss)))
             t.refresh()
         if FLAGS.dataset == "SemEval" or FLAGS.dataset == "TrecQA":
-            curr_map = SemEval_test_step(sess, model, test_data, callback)
+            curr_map, curr_mrr = SemEval_test_step(sess, model, test_data, callback)
         elif FLAGS.dataset == "QNLI":
             curr_map = SNLI_test_step(sess, model, test_data)
-        print("Best MAP:%.6f on epoch %d" %(best_map, best_epoch))
+        print("Best MAP:%.6f on epoch %d with MRR:%.6f" %(best_map, best_epoch, mrr_on_best_map))
         if curr_map > best_map:
             best_map = curr_map
             best_epoch = e
+            if FLAGS.dataset == "SemEval" or FLAGS.dataset == "TrecQA":
+                mrr_on_best_map = curr_mrr
             save_path = saver.save(sess, os.path.join(checkpoint_dir, "checkpoint"), e)
